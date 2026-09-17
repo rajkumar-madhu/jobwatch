@@ -59,7 +59,7 @@ curl -s localhost:8010/heartbeat/<token>/success
 Conditions: `failed | missed | late | runtime_exceeded | recovered | consecutive_failures{count} | sla_breach`.
 Scope keys: `job_ids | tags | environment_ids | workspace_ids | team_ids` (empty = all).
 Suppression order: maintenance window → business hours → dedup/repeat_interval → flapping collapse (3 changes/10 min → one "flapping" alert).
-Channels: email, slack, teams, discord, telegram, webhook (HMAC `X-WeCrew JobWatch-Signature`). PagerDuty/Opsgenie/SMS = Phase 6.
+Channels: email, slack, teams, discord, telegram, webhook (HMAC `X-JobWatch-Signature`). PagerDuty/Opsgenie/SMS = Phase 6.
 
 ### Phase 2 stubs
 - Maintenance `rrule` stored but not expanded (one-off windows only).
