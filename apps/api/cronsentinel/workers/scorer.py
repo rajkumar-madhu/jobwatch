@@ -51,6 +51,12 @@ def tick(s):
     n = s.execute(text(SCORE_SQL)).rowcount
     s.execute(text(USAGE_SQL))
     s.execute(text("SELECT ensure_month_partition('executions', (now() + interval '1 month')::date)"))
+    s.execute(text("SELECT ensure_month_partition('expected_runs', (now() + interval '1 month')::date)"))
+    # R3 open item: expected_runs retention, per plan. Row deletes like executions for now; the same
+    # partition-drop TODO applies (drop whole month partitions older than the max retention in use).
+    s.execute(text("""DELETE FROM expected_runs er USING organizations o JOIN plan_limits pl ON pl.plan=o.plan
+        WHERE er.org_id=o.id AND er.scheduled_for < now() - (pl.expected_runs_retention_days || ' days')::interval"""))
+    s.execute(text("DELETE FROM signal_deliveries WHERE created_at < now() - interval '30 days'"))
     s.execute(text("SELECT ensure_month_partition('host_metrics', (now() + interval '1 month')::date)"))
     d = s.execute(text(RETENTION_SQL)).rowcount  # TODO: drop whole partitions instead of row deletes for large tenants
     s.execute(text("DELETE FROM execution_logs l WHERE NOT EXISTS (SELECT 1 FROM executions e WHERE e.id=l.execution_id)"))

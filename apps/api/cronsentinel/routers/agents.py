@@ -225,6 +225,10 @@ def agent_heartbeat(body: dict, a: dict = Depends(agent_principal)):
         except Exception:
             pass
     with system_session() as s:
-        s.execute(text("UPDATE agents SET last_seen_at=now(), version=COALESCE(:v, version), skew_ms=:sk, status='active' WHERE id=:a"),
-                  {"v": body.get("version"), "sk": skew, "a": a["agent_id"]})
+        # R3 open item: agents report their own heartbeat interval so "offline" is per-agent (3× interval), not a fixed 10 min
+        hb = body.get("heartbeat_interval_s")
+        hb = int(hb) if isinstance(hb, (int, float)) and 10 <= hb <= 3600 else None
+        s.execute(text("UPDATE agents SET last_seen_at=now(), version=COALESCE(:v, version), skew_ms=:sk, status='active', "
+                       "heartbeat_interval_s=COALESCE(:hb, heartbeat_interval_s) WHERE id=:a"),
+                  {"v": body.get("version"), "sk": skew, "hb": hb, "a": a["agent_id"]})
     return {"ok": True, "skew_ms": skew, "server_ts": datetime.now(timezone.utc).isoformat()}

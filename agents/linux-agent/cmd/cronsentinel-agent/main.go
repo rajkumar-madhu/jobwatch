@@ -214,7 +214,7 @@ func cmdRun() {
 			if err := client.SendMetrics(ctx, mm); err != nil {
 				log.Printf("metrics failed: %v", err)
 			}
-			_ = client.Heartbeat(ctx)
+			_ = client.Heartbeat(ctx, cfg.MetricsEvery)
 		}
 	}()
 

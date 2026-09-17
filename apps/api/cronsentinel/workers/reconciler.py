@@ -24,7 +24,7 @@ from ..db import system_session
 from ..states import SlotState, derive, legacy_status
 
 log = structlog.get_logger()
-AGENT_OFFLINE_AFTER = timedelta(minutes=10)  # agent silent this long ⇒ its jobs are UNKNOWN, not failing
+OFFLINE_MULTIPLIER = 3  # agent silent for 3× its own reported heartbeat interval ⇒ its jobs are UNKNOWN, not failing
 
 
 def _settle_maintenance(s) -> int:
@@ -76,7 +76,7 @@ def _mark_timeouts(s) -> list[tuple]:
 def recompute_state(s, job_id, org_id) -> dict | None:
     """Recompute the four-state for one job from its slots. Returns a change event, or None."""
     j = s.execute(text("""SELECT j.id, j.paused, j.schedule_expr, j.last_run_at, j.job_state::text, j.status::text, j.state_since,
-            a.last_seen_at AS agent_seen
+            a.last_seen_at AS agent_seen, a.heartbeat_interval_s AS agent_hb
         FROM jobs j LEFT JOIN servers sv ON sv.id=j.server_id LEFT JOIN agents a ON a.id=sv.agent_id
         WHERE j.id=:id FOR UPDATE"""), {"id": job_id}).first()
     if not j:
@@ -87,7 +87,7 @@ def recompute_state(s, job_id, org_id) -> dict | None:
         ORDER BY scheduled_for DESC LIMIT 1"""), {"id": job_id}).scalar()
     prev_ok = s.execute(text("""SELECT state::text FROM expected_runs WHERE job_id=:id AND state IN ('succeeded','failed','missed')
         ORDER BY scheduled_for DESC OFFSET 1 LIMIT 1"""), {"id": job_id}).scalar()
-    agent_offline = bool(j.agent_seen and datetime.now(UTC) - j.agent_seen > AGENT_OFFLINE_AFTER)
+    agent_offline = bool(j.agent_seen and datetime.now(UTC) - j.agent_seen > timedelta(seconds=(j.agent_hb or 60) * OFFLINE_MULTIPLIER))
     last_slot = SlotState(last) if last else None
     state, reason = derive(paused=j.paused, has_schedule=bool(j.schedule_expr), ever_ran=bool(j.last_run_at),
                            agent_offline=agent_offline, open_late=bool(open_late), running=bool(running), last_settled=last_slot)
@@ -113,7 +113,7 @@ def tick(s) -> list[dict]:
     for r in _mark_timeouts(s): touched.add((r.job_id, r.org_id))
     # jobs whose agent just went quiet, or came back, also need a state pass
     for r in s.execute(text("""SELECT j.id, j.org_id FROM jobs j JOIN servers sv ON sv.id=j.server_id JOIN agents a ON a.id=sv.agent_id
-        WHERE (a.last_seen_at < now() - interval '10 minutes') <> (j.job_state='unknown' AND j.unknown_reason='agent_offline')""")).all():
+        WHERE (a.last_seen_at < now() - (a.heartbeat_interval_s * 3 || ' seconds')::interval) <> (j.job_state='unknown' AND j.unknown_reason='agent_offline')""")).all():
         touched.add((r.id, r.org_id))
     if skipped:
         log.info("slots skipped (maintenance/paused)", slots=skipped)

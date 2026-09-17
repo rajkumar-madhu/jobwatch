@@ -6,6 +6,7 @@
   (dict "name" "exec-processor" "image" $.Values.image.api "command" (list "python" "-m" "cronsentinel.workers.exec_processor") "replicas" $.Values.replicas.execProcessor "resources" $.Values.resources.worker)
   (dict "name" "reconciler" "image" $.Values.image.api "command" (list "python" "-m" "cronsentinel.workers.reconciler") "replicas" $.Values.replicas.reconciler "resources" $.Values.resources.worker)
   (dict "name" "schedule-generator" "image" $.Values.image.api "command" (list "python" "-m" "cronsentinel.workers.schedule_generator") "replicas" $.Values.replicas.scheduleGenerator "resources" $.Values.resources.worker)
+  (dict "name" "outbound-exporter" "image" $.Values.image.api "command" (list "python" "-m" "cronsentinel.workers.outbound_exporter") "replicas" $.Values.replicas.outboundExporter "resources" $.Values.resources.worker)
   (dict "name" "rule-engine" "image" $.Values.image.api "command" (list "python" "-m" "cronsentinel.workers.rule_engine") "replicas" $.Values.replicas.ruleEngine "resources" $.Values.resources.worker)
   (dict "name" "notifier" "image" $.Values.image.api "command" (list "celery" "-A" "cronsentinel.celery_app.celery" "worker" "-Q" "notify" "--concurrency" "4") "replicas" $.Values.replicas.notifier "resources" $.Values.resources.worker)
   (dict "name" "scorer" "image" $.Values.image.api "command" (list "python" "-m" "cronsentinel.workers.scorer") "replicas" $.Values.replicas.scorer "resources" $.Values.resources.worker)

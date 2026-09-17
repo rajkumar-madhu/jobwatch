@@ -89,8 +89,12 @@ func (c *Client) SendMetrics(ctx context.Context, m map[string]any) error {
 	return c.post(ctx, "/agent/v1/metrics", m, nil)
 }
 
-func (c *Client) Heartbeat(ctx context.Context) error {
-	return c.post(ctx, "/agent/v1/heartbeat", map[string]any{"version": Version, "agent_ts": time.Now().UTC()}, nil)
+// Heartbeat reports liveness plus the interval the server should expect it at, so the server
+// can declare this agent offline relative to *its* cadence rather than a global constant.
+func (c *Client) Heartbeat(ctx context.Context, every time.Duration) error {
+	return c.post(ctx, "/agent/v1/heartbeat", map[string]any{
+		"version": Version, "agent_ts": time.Now().UTC(), "heartbeat_interval_s": int(every.Seconds()),
+	}, nil)
 }
 
 const Version = "0.1.0"

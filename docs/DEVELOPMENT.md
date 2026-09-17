@@ -130,3 +130,21 @@ Tests: `tests/test_states.py` (10), `tests/test_schedule_engine.py` (9) — all 
   real maintenance rows, the Phase 2 scope shape was only exercised through the Python path.
 - No integration test binds an execution to a slot end-to-end — needs the live-PG harness that
   `tests/test_tenant_isolation.py` already skips on.
+
+## R4 — AEGIS-downstream boundary + R3 open items
+
+New: `alembic/versions/0006_outbound_signals.py` (signal_destinations, signal_deliveries, agents.heartbeat_interval_s,
+plan_limits.expected_runs_retention_days), `cronsentinel/outbound/{schema,deliver}.py`, `workers/outbound_exporter.py`
+(new service), `routers/integrations.py`, web `/integrations` page, `docs/AEGIS_BOUNDARY.md`.
+
+Closed R3 open items: expected_runs retention + partition creation in scorer; agent-offline threshold is now
+3× the agent's own reported `heartbeat_interval_s` (Linux agent sends it; K8s agent still does not).
+
+Also fixed: rename had produced `X-WeCrew JobWatch-Signature` (invalid header, space) → `X-JobWatch-Signature`.
+
+Tests: `tests/test_outbound_schema.py` (9 contract tests). 49 passed / 1 skipped.
+
+### Not verified
+- Migration 0006 not run against live Postgres (no DB in sandbox).
+- `deliver_signal` Celery task exercised only through import + `sign()`; end-to-end delivery needs Redis + a receiver.
+- Go changes (heartbeat interval field) not compiled — R1 still pending on a real host.

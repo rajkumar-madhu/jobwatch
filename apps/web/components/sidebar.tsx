@@ -8,7 +8,7 @@ import { api, type Overview } from "@/lib/api";
 
 const NAV: [string, string][] = [
   ["/", "Overview"], ["/jobs", "Jobs"], ["/failures", "Failures"], ["/incidents", "Incidents"], ["/logs", "Logs"], ["/kubernetes", "Kubernetes"], ["/topology", "Topology"],
-  ["/analytics", "Analytics"], ["/copilot", "AI Copilot"], ["/billing", "Billing"], ["/agents", "Servers & agents"], ["/alerting", "Alerting"], ["/settings", "Settings"],
+  ["/analytics", "Analytics"], ["/copilot", "AI Copilot"], ["/billing", "Billing"], ["/agents", "Servers & agents"], ["/alerting", "Alerting"], ["/integrations", "Integrations"], ["/settings", "Settings"],
 ];
 
 function NavList({ bad, onNav }: { bad: number; onNav?: () => void }) {
