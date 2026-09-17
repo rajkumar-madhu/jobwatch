@@ -109,3 +109,24 @@ Phase 4b delivers Failures, Incidents (+detail), Logs explorer, Servers & agents
 
 ## Known stubs (whole project)
 `/metrics` worker lag gauges · JWKS verification on id_token · rrule maintenance windows · PagerDuty/Opsgenie/SMS senders · passive-mode exit codes · K8s agent disk buffer · pg_trgm/ClickHouse log search · escalation policies · private status pages · partition-drop retention · CSRF token for cookie POSTs · Go code uncompiled in this delivery · e2e/frontend component tests.
+
+## R2/R3 — correctness retrofit + schedule engine
+
+New: `alembic/versions/0005_schedule_engine.py` (expected_runs partitioned + RLS, job_state/unknown_reason/
+generated_through/consecutive_failures on jobs, executions.expected_run_id, backfill from legacy status),
+`cronsentinel/states.py` (pure four-state), `cronsentinel/schedule_engine.py` (pure slot maths),
+`cronsentinel/workers/schedule_generator.py` (new service, 60s), rewritten `workers/reconciler.py`,
+`processor.attach_slot`, UNKNOWN suppression in `alerting/rules.py` + `alerting/engine.py`.
+
+Wired into `infra/docker/docker-compose.yml` and the Helm workloads list as `schedule-generator`.
+
+Tests: `tests/test_states.py` (10), `tests/test_schedule_engine.py` (9) — all pure, no DB. 40 passed / 1 skipped.
+
+### Not verified
+- Migration 0005 has not been run against a live Postgres in this sandbox (no DB available); the
+  partition + RLS statements follow the same shape as 0001 but need `alembic upgrade head` on a real
+  instance before trusting the backfill UPDATE.
+- The reconciler's maintenance-window SQL uses `jsonb ?` containment against `scope`; verify against
+  real maintenance rows, the Phase 2 scope shape was only exercised through the Python path.
+- No integration test binds an execution to a slot end-to-end — needs the live-PG harness that
+  `tests/test_tenant_isolation.py` already skips on.

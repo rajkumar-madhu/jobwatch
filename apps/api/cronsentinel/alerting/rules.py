@@ -49,7 +49,22 @@ def scope_matches(rule: Rule, job: JobCtx) -> bool:
     return False
 
 
-def condition_fires(rule: Rule, prev: str, new: str, job: JobCtx) -> bool:
+def suppressed_unknown(new_state: str | None, unknown_reason: str | None) -> str | None:
+    """R2 — UNKNOWN-visibility suppression. A job we cannot make a statement about must never page.
+    Returns a suppression reason (for the ledger) or None.
+
+    This closes a real hole in the old model: when an agent died, every job it owned marched
+    HEALTHY -> LATE -> MISSED and fired one alert each, so a single host outage produced a page
+    per job. Those jobs are now UNKNOWN/agent_offline and alert once, on the agent, not N times."""
+    if new_state != "unknown":
+        return None
+    return f"unknown:{unknown_reason or 'no_data'}"
+
+
+def condition_fires(rule: Rule, prev: str, new: str, job: JobCtx, *, new_state: str | None = None,
+                    unknown_reason: str | None = None) -> bool:
+    if suppressed_unknown(new_state, unknown_reason):
+        return False
     c = rule.condition
     if c == "failed":
         return new == "failed"

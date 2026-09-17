@@ -1,6 +1,6 @@
 """Execution event → DB state. Shared by ingest (sync fallback) and NATS worker.
 Idempotent on (execution_id, sequence) — D5. Monotonic status."""
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import text
 from ulid import ULID
@@ -12,13 +12,33 @@ from .state_machine import Event, JobStatus, transition
 _ORDER = {"scheduled": 0, "running": 1, "success": 2, "failed": 2, "timeout": 2, "missed": 2}
 
 
+def attach_slot(s, org, job_id, started_at, exec_id: str, status: str) -> int | None:
+    """R3: bind an execution to the expected_run slot it belongs to, so late/missed accounting is
+    per-slot rather than per-job. Executions with no matching slot (manual run, ad-hoc invocation,
+    heartbeat-only job) stay unattached — they still record, they just do not settle a slot."""
+    row = s.execute(text("""
+        SELECT id FROM expected_runs
+        WHERE job_id = :j AND org_id = :o AND state IN ('pending','late','running')
+          AND :ts BETWEEN scheduled_for - interval '90 seconds' AND deadline
+        ORDER BY abs(EXTRACT(EPOCH FROM (:ts - scheduled_for))), scheduled_for LIMIT 1"""),
+        {"j": job_id, "o": org, "ts": started_at}).first()
+    if not row:
+        return None
+    new = {"running": "running", "success": "succeeded", "failed": "failed", "timeout": "failed"}.get(status, "running")
+    s.execute(text("""UPDATE expected_runs SET state=:st, execution_id=:e, matched_at=now(),
+        settled_at = CASE WHEN :st IN ('succeeded','failed') THEN now() ELSE settled_at END WHERE id=:id"""),
+        {"st": new, "e": exec_id, "id": row.id})
+    s.execute(text("UPDATE executions SET expected_run_id=:er WHERE id=:e AND org_id=:o"), {"er": row.id, "e": exec_id, "o": org})
+    return row.id
+
+
 def process(s, ev: dict) -> dict | None:
     """ev: {org_id, job_id, agent_id?, kind: start|success|fail, execution_id?, sequence, agent_ts?, server_ts,
     duration_ms?, exit_code?, host?, stdout_tail?, stderr_tail?, meta}
     Returns {job_id, prev_status, new_status} or None if duplicate."""
     org, job_id = ev["org_id"], ev["job_id"]
     exec_id = ev.get("execution_id") or str(ULID())
-    server_ts = datetime.fromisoformat(ev["server_ts"]) if isinstance(ev.get("server_ts"), str) else ev.get("server_ts") or datetime.now(timezone.utc)
+    server_ts = datetime.fromisoformat(ev["server_ts"]) if isinstance(ev.get("server_ts"), str) else ev.get("server_ts") or datetime.now(UTC)
     agent_ts = ev.get("agent_ts")
     if isinstance(agent_ts, str):
         agent_ts = datetime.fromisoformat(agent_ts)
@@ -46,6 +66,7 @@ def process(s, ev: dict) -> dict | None:
             {"id": exec_id, "org": org, "job": job_id, "agent": ev.get("agent_id"), "sched": agent_ts or server_ts,
              "ats": agent_ts or server_ts, "sts": server_ts, "skew": skew_ms, "host": ev.get("host"), "seq": ev.get("sequence", 0),
              "meta": __import__("json").dumps(ev.get("meta", {}))})
+        attach_slot(s, org, job_id, agent_ts or server_ts, exec_id, "running")
         new = transition(prev, Event.STARTED)
     else:
         final = "success" if ev["kind"] == "success" else "failed"
@@ -62,7 +83,7 @@ def process(s, ev: dict) -> dict | None:
         else:
             # success/fail without prior start (simple ping mode): synthesize a single-point execution
             duration = ev.get("duration_ms")
-            start = end_ts if duration is None else datetime.fromtimestamp(end_ts.timestamp() - duration / 1000, tz=timezone.utc)
+            start = end_ts if duration is None else datetime.fromtimestamp(end_ts.timestamp() - duration / 1000, tz=UTC)
             s.execute(text(
                 "INSERT INTO executions (id, org_id, job_id, agent_id, status, scheduled_ts, agent_ts_start, agent_ts_end, server_received_ts, skew_ms, duration_ms, exit_code, host, sequence_max, meta) "
                 "VALUES (:id, :org, :job, :agent, :st, :sched, :start, :end, :sts, :skew, :dur, :ec, :host, :seq, :meta::jsonb) ON CONFLICT DO NOTHING"),
@@ -76,14 +97,17 @@ def process(s, ev: dict) -> dict | None:
                     "INSERT INTO execution_logs (org_id, execution_id, stream, chunk_idx, content) VALUES (:org, :eid, :stream, 0, :c) "
                     "ON CONFLICT DO NOTHING"),
                     {"org": org, "eid": exec_id, "stream": stream, "c": redact(tail)[-settings.max_log_bytes_per_execution:]})
+        attach_slot(s, org, job_id, start or end_ts, exec_id, "success" if final == "success" else "failed")
         new = transition(prev, Event.COMPLETED_OK if final == "success" else Event.COMPLETED_FAIL)
         s.execute(text("UPDATE jobs SET last_run_at=:ts, last_status=:st WHERE id=:id"), {"ts": end_ts, "st": final, "id": job_id})
 
-    # advance next_expected_at only when a run has started/completed
+    # R3: expected_runs is the source of truth for late/missed. next_expected_at is now a display
+    # cache only — read from the next unsettled slot so a late start cannot push the expectation
+    # forward (the old behaviour silently hid a job that drifted later every run).
     if job.schedule_expr:
-        from .schedule import next_run
-        s.execute(text("UPDATE jobs SET next_expected_at=:n, late_marked_at=NULL WHERE id=:id"),
-                  {"n": next_run(job.schedule_expr, job.tz, server_ts), "id": job_id})
+        s.execute(text("""UPDATE jobs SET next_expected_at = (
+            SELECT min(scheduled_for) FROM expected_runs WHERE job_id=:id AND state='pending' AND scheduled_for > now()
+        ), late_marked_at=NULL WHERE id=:id"""), {"id": job_id})
 
     s.execute(text("UPDATE jobs SET status=:st, updated_at=now() WHERE id=:id"), {"st": new.value, "id": job_id})
     return {"job_id": job_id, "execution_id": exec_id, "prev_status": prev.value, "new_status": new.value}

@@ -16,7 +16,7 @@ env:                      # rendered into a Secret; supply real values via --set
   COPILOT_MODEL: Qwen/Qwen2.5-14B-Instruct
   STRIPE_SECRET_KEY: ""
   STRIPE_WEBHOOK_SECRET: ""
-replicas: {api: 2, ingest: 2, web: 2, execProcessor: 2, reconciler: 1, ruleEngine: 1, notifier: 2, scorer: 1}
+replicas: {api: 2, ingest: 2, web: 2, execProcessor: 2, reconciler: 1, scheduleGenerator: 1, ruleEngine: 1, notifier: 2, scorer: 1}
 nats: {replicas: 3, storage: 10Gi}
 resources:
   api: {requests: {cpu: 100m, memory: 256Mi}, limits: {cpu: "1", memory: 512Mi}}

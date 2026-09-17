@@ -34,3 +34,48 @@ reconciler (30s): next_expected_at + grace < now and no start → LATE; at 2×gr
 
 ## Auth paths
 Cookie `cs_session` (HS256, from Keycloak code flow) · `Authorization: Bearer` (Keycloak JWT + `X-Org-Id`) · `X-API-Key` (argon2-hashed, role-scoped) · `X-Agent-Key`+`X-Agent-Id` (agents, ingest tier only).
+
+## R2/R3 — expected-run engine and four-state model
+
+### Why the old model was wrong
+`jobs.next_expected_at` was a single mutable column, rolled forward whenever a run arrived. Three
+failures fell out of that:
+
+1. **Lost misses.** If the reconciler was down when a run was due, the column had already moved on
+   by the time it came back — the missed run was never recorded.
+2. **Silent drift.** A job that consistently started 10 minutes late pushed its own expectation
+   forward each run, so it never looked late. The schedule was effectively redefined by the job.
+3. **No slot identity.** Overlapping runs could not be attributed to the occurrence they belonged
+   to, so "did the 02:00 run succeed?" was unanswerable.
+
+### What replaces it
+`expected_runs` materialises every slot a schedule should produce, ahead of time
+(`schedule-generator`, every 60s, 6h horizon, 2-day backfill cap, unique on `(job_id, scheduled_for)`).
+Slots are generated **independently of executions**, so:
+
+- an outage delays detection but never loses it — overdue slots are still `pending` on restart
+- lateness is measured against the schedule, not against the last run
+- executions bind to a slot via a match window (`scheduled_for - 90s` .. `deadline`)
+
+Slot lifecycle: `pending → running → succeeded | failed`, or `pending → late → missed`, or
+`→ skipped` when the slot fell inside a maintenance window or the job was paused.
+
+### Four states
+`OK | LATE | FAILING | UNKNOWN`, derived in `cronsentinel/states.py` (pure). The legacy nine-value
+`jobs.status` is still written, derived from the four-state, so existing UI, filters and status
+pages keep working unchanged.
+
+**UNKNOWN-visibility suppression** is the operational point: UNKNOWN means *we cannot make a
+statement*, and never alerts. Previously a dead agent marched every job it owned through
+HEALTHY → LATE → MISSED and fired one page per job. Those jobs are now `unknown/agent_offline` —
+the alert belongs to the agent, once, not to N jobs.
+
+### Open items
+- `expected_runs` retention is not wired into the scorer's partition-drop path yet — slots
+  accumulate. Drop partitions on the same per-plan schedule as executions.
+- Slot generation is single-worker (`FOR UPDATE SKIP LOCKED` makes it safe to run more, but the
+  `generated_through` cursor has not been load-tested with concurrent generators).
+- Maintenance-window matching in the reconciler expands one-off windows only; rrule recurrence is
+  still a stub (unchanged from Phase 2).
+- `agent_offline` uses a fixed 10-minute threshold; should be per-agent, derived from its reported
+  heartbeat interval.

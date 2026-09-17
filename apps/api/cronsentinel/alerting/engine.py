@@ -52,6 +52,12 @@ def _record_change(job_id: str, now: datetime) -> list[datetime]:
 
 def handle_status_change(ev: dict):
     org, job_id, prev, new = ev["org_id"], ev["job_id"], ev["prev_status"], ev["new_status"]
+    # R2 — UNKNOWN-visibility suppression, checked before any rule work so an agent outage cannot
+    # fan out into one page per job it owned. Logged so the reason is visible in the ledger view.
+    supp = R.suppressed_unknown(ev.get("new_state"), ev.get("unknown_reason"))
+    if supp:
+        log.info("suppressed: unknown visibility", job=job_id, reason=supp)
+        return
     now = datetime.now(timezone.utc)
     with system_session() as s:
         job = _job_ctx(s, org, job_id)
@@ -74,7 +80,7 @@ def handle_status_change(ev: dict):
         for rr in rule_rows:
             rule = R.Rule(id=str(rr.id), condition=rr.condition, scope=rr.scope or {}, params=rr.params or {}, severity=str(rr.severity),
                           channel_ids=[str(c) for c in rr.channel_ids or []], business_hours=rr.business_hours, repeat_interval_s=rr.repeat_interval_s)
-            if not R.scope_matches(rule, job) or not R.condition_fires(rule, prev, new, job):
+            if not R.scope_matches(rule, job) or not R.condition_fires(rule, prev, new, job, new_state=ev.get("new_state"), unknown_reason=ev.get("unknown_reason")):
                 continue
             if not R.in_business_hours(rule.business_hours, now):
                 log.info("suppressed: outside business hours", rule=rule.id); continue

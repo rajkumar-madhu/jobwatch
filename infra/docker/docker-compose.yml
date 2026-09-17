@@ -51,6 +51,11 @@ services:
     command: python -m cronsentinel.workers.exec_processor
     environment: *api-env
     depends_on: [api]
+  schedule-generator:
+    build: {context: ../.., dockerfile: infra/docker/Dockerfile.api}
+    command: python -m cronsentinel.workers.schedule_generator
+    environment: *api-env
+    depends_on: [api]
   reconciler:
     build: {context: ../.., dockerfile: infra/docker/Dockerfile.api}
     command: python -m cronsentinel.workers.reconciler
