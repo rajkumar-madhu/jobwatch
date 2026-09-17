@@ -1,0 +1,13 @@
+server: https://ingest.example.com
+clusterName: production
+bootstrapToken: ""          # one-time; after first run copy agentId/agentKey from logs into existingSecret
+existingSecret: ""          # Secret with keys CS_AGENT_ID, CS_AGENT_KEY (preferred for restarts)
+scope: cluster              # cluster | namespaces
+namespaces: []              # used when scope=namespaces
+insecureSkipTLS: false
+image:
+  repository: ghcr.io/cronsentinel/k8s-agent
+  tag: 0.1.0
+resources:
+  requests: {cpu: 20m, memory: 48Mi}
+  limits: {cpu: 200m, memory: 128Mi}

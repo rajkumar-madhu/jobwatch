@@ -1,0 +1,53 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap");
+@tailwind base; @tailwind components; @tailwind utilities;
+
+/* Light-first (D16). Cool neutral base — deliberately not cream, not near-black. */
+:root {
+  --bg: 250 251 252; --panel: 255 255 255; --line: 226 229 235; --ink: 22 24 29; --mute: 104 111 122;
+  --accent: 43 74 168;      /* slate-indigo: used once — the selected/primary action */
+  --ok: 31 141 82; --bad: 196 51 36; --warn: 186 117 0; --run: 21 101 216;
+}
+.dark {
+  --bg: 17 19 23; --panel: 24 27 33; --line: 44 48 56; --ink: 232 234 238; --mute: 138 145 157;
+  --accent: 132 158 240; --ok: 72 187 120; --bad: 240 96 80; --warn: 226 160 48; --run: 96 160 255;
+}
+html { color-scheme: light; } html.dark { color-scheme: dark; }
+body { @apply bg-bg text-ink font-sans text-[13.5px] leading-[1.45] antialiased; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 2px; }
+
+/* Status dot: the single visual grammar used everywhere for job/execution state. */
+.dot { @apply inline-block h-2 w-2 rounded-full align-middle; }
+.dot-healthy, .dot-success, .dot-recovered { background: rgb(var(--ok)); }
+.dot-failed, .dot-timeout { background: rgb(var(--bad)); }
+.dot-late, .dot-missed { background: rgb(var(--warn)); }
+.dot-running { background: rgb(var(--run)); animation: pulse 1.6s ease-in-out infinite; }
+.dot-paused, .dot-unknown, .dot-scheduled { background: rgb(var(--mute)); opacity: .5; }
+@keyframes pulse { 50% { opacity: .35; } }
+
+/* Run strip: proportional history bars (the memorable element). */
+.strip { display: flex; gap: 2px; height: 22px; align-items: flex-end; }
+.strip > i { flex: 1 1 0; min-width: 3px; border-radius: 2px; background: rgb(var(--mute) / .25); transition: transform .12s; }
+.strip > i:hover { transform: scaleY(1.15); }
+.strip > i.success { background: rgb(var(--ok)); } .strip > i.failed, .strip > i.timeout { background: rgb(var(--bad)); }
+.strip > i.missed { background: rgb(var(--warn)); } .strip > i.running { background: rgb(var(--run)); }
+
+.row { @apply grid items-center gap-4 border-b border-line px-4 py-2.5; }
+.tbl { overflow-x: auto; }
+.tbl > .row[class*="px"], .tbl > * > .row[class*="px"] { min-width: 640px; }  /* only wide multi-column tables scroll; simple 1fr_auto lists stay fluid */
+.tbl > .row:last-child { border-bottom: 0; }
+.row:hover { background: rgb(var(--ink) / .025); }
+.th { @apply text-mute text-xs; }
+@media (max-width: 640px) { .mx-auto.max-w-\[1200px\] { padding-left: 1rem; padding-right: 1rem; } }
+.btn { @apply inline-flex items-center gap-1.5 rounded-md border border-line bg-panel px-3 py-1.5 text-sm hover:border-mute/60; }
+.btn-primary { @apply border-accent bg-accent text-white hover:opacity-90; }
+.kbd { @apply rounded border border-line bg-bg px-1.5 font-mono text-[11px] text-mute; }
+.skeleton { @apply animate-pulse rounded bg-line/60; }
+
+/* Landing pipeline packets */
+.pipe-line { overflow: visible; }
+.pkt { position: absolute; top: -3px; width: 7px; height: 7px; border-radius: 50%; left: 0; animation: travel 5s linear infinite; }
+.pkt-ok { background: rgb(var(--ok)); } .pkt-bad { background: rgb(var(--bad)); animation-delay: 1.7s; } .pkt-warn { background: rgb(var(--warn)); animation-delay: 3.4s; }
+.pipe-rev .pkt { animation-name: travel; }
+@keyframes travel { 0% { left: 0; opacity: 0 } 8% { opacity: 1 } 92% { opacity: 1 } 100% { left: 100%; opacity: 0 } }
+.node:hover { transform: translateY(-2px); transition: transform .15s; }

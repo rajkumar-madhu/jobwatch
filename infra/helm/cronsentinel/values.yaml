@@ -1,0 +1,23 @@
+image: {api: ghcr.io/cronsentinel/api:0.1.0, web: ghcr.io/cronsentinel/web:0.1.0}
+domain: cronsentinel.example.com
+ingestDomain: ingest.cronsentinel.example.com
+env:                      # rendered into a Secret; supply real values via --set-file or external-secrets
+  DATABASE_URL: postgresql+psycopg://user:pass@postgres:5432/cronsentinel
+  REDIS_URL: redis://redis:6379/0
+  NATS_URL: nats://cronsentinel-nats:4222
+  KEYCLOAK_ISSUER: https://auth.example.com/realms/cronsentinel
+  KEYCLOAK_CLIENT_ID: cronsentinel-web
+  KEYCLOAK_CLIENT_SECRET: ""
+  SECRET_ENCRYPTION_KEY: ""
+  API_PUBLIC_URL: https://cronsentinel.example.com
+  WEB_PUBLIC_URL: https://cronsentinel.example.com
+  COOKIE_SECURE: "true"
+  COPILOT_BASE_URL: http://vllm:8000
+  COPILOT_MODEL: Qwen/Qwen2.5-14B-Instruct
+  STRIPE_SECRET_KEY: ""
+  STRIPE_WEBHOOK_SECRET: ""
+replicas: {api: 2, ingest: 2, web: 2, execProcessor: 2, reconciler: 1, ruleEngine: 1, notifier: 2, scorer: 1}
+nats: {replicas: 3, storage: 10Gi}
+resources:
+  api: {requests: {cpu: 100m, memory: 256Mi}, limits: {cpu: "1", memory: 512Mi}}
+  worker: {requests: {cpu: 50m, memory: 192Mi}, limits: {cpu: 500m, memory: 384Mi}}

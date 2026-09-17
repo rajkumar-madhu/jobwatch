@@ -1,0 +1,37 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    services:
+      postgres: {image: postgres:16-alpine, env: {POSTGRES_USER: cronsentinel, POSTGRES_PASSWORD: cronsentinel, POSTGRES_DB: cronsentinel}, ports: ["5432:5432"], options: --health-cmd pg_isready --health-interval 5s --health-retries 10}
+      redis: {image: redis:7-alpine, ports: ["6379:6379"]}
+    env: {DATABASE_URL: postgresql+psycopg://cronsentinel:cronsentinel@localhost:5432/cronsentinel, REDIS_URL: redis://localhost:6379/0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: cd apps/api && pip install -e ".[dev]" && ruff check . && alembic upgrade head && pytest -q
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 22}
+      - run: cd apps/web && npm ci --no-audit || npm install && npm run build
+  agents:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: {go-version: "1.23"}
+      - run: cd agents/linux-agent && go vet ./... && go test ./... && make build
+      - run: cd agents/k8s-agent && go mod tidy && go vet ./... && go build ./...
+  images:
+    needs: [api, web, agents]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f infra/docker/Dockerfile.api -t ghcr.io/${{ github.repository }}/api:${{ github.sha }} . && docker build -f infra/docker/Dockerfile.web -t ghcr.io/${{ github.repository }}/web:${{ github.sha }} .
+      # TODO: login + push to GHCR, helm package, release assets for agent binaries

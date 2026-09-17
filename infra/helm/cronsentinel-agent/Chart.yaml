@@ -1,0 +1,6 @@
+apiVersion: v2
+name: cronsentinel-agent
+description: CronSentinel Kubernetes agent — watches CronJobs, Jobs, Pods and Events (read-only)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

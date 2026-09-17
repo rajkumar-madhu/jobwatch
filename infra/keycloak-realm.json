@@ -1,0 +1,14 @@
+{
+  "realm": "cronsentinel", "enabled": true, "registrationAllowed": true, "verifyEmail": true, "resetPasswordAllowed": true, "bruteForceProtected": true,
+  "clients": [{
+    "clientId": "cronsentinel-web", "protocol": "openid-connect", "publicClient": false, "secret": "change-me",
+    "redirectUris": ["http://localhost:8000/auth/callback"], "webOrigins": ["http://localhost:3000"],
+    "standardFlowEnabled": true, "directAccessGrantsEnabled": false
+  }],
+  "identityProviders": [
+    {"alias": "google", "providerId": "google", "enabled": false, "config": {"clientId": "TODO", "clientSecret": "TODO"}},
+    {"alias": "github", "providerId": "github", "enabled": false, "config": {"clientId": "TODO", "clientSecret": "TODO"}},
+    {"alias": "microsoft", "providerId": "microsoft", "enabled": false, "config": {"clientId": "TODO", "clientSecret": "TODO"}}
+  ],
+  "requiredActions": [{"alias": "CONFIGURE_TOTP", "name": "Configure OTP", "enabled": true, "defaultAction": false}]
+}

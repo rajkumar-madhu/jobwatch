@@ -1,0 +1,23 @@
+{{- range $s := list (dict "n" "api" "p" 8000) (dict "n" "ingest" "p" 8010) (dict "n" "web" "p" 3000) }}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: {{ include "cs.fullname" $ }}-{{ $s.n }}, namespace: {{ $.Release.Namespace }}}
+spec: {selector: {app: {{ include "cs.fullname" $ }}-{{ $s.n }}}, ports: [{port: {{ $s.p }}, targetPort: {{ $s.p }}}]}
+{{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: {name: {{ include "cs.fullname" . }}, namespace: {{ .Release.Namespace }}, annotations: {nginx.ingress.kubernetes.io/limit-rps: "50"}}
+spec:
+  tls: [{hosts: [{{ .Values.domain }}, {{ .Values.ingestDomain }}], secretName: {{ include "cs.fullname" . }}-tls}]
+  rules:
+    - host: {{ .Values.domain }}
+      http: {paths: [{path: /api, pathType: Prefix, backend: {service: {name: {{ include "cs.fullname" . }}-api, port: {number: 8000}}}}, {path: /auth, pathType: Prefix, backend: {service: {name: {{ include "cs.fullname" . }}-api, port: {number: 8000}}}}, {path: /public, pathType: Prefix, backend: {service: {name: {{ include "cs.fullname" . }}-api, port: {number: 8000}}}}, {path: /, pathType: Prefix, backend: {service: {name: {{ include "cs.fullname" . }}-web, port: {number: 3000}}}}]}
+    - host: {{ .Values.ingestDomain }}
+      http: {paths: [{path: /, pathType: Prefix, backend: {service: {name: {{ include "cs.fullname" . }}-ingest, port: {number: 8010}}}}]}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: {name: {{ include "cs.fullname" . }}-ingest, namespace: {{ .Release.Namespace }}}
+spec: {scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: {{ include "cs.fullname" . }}-ingest}, minReplicas: {{ .Values.replicas.ingest }}, maxReplicas: 20, metrics: [{type: Resource, resource: {name: cpu, target: {type: Utilization, averageUtilization: 60}}}]}

@@ -1,0 +1,22 @@
+[Unit]
+Description=CronSentinel Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/cronsentinel-agent run
+Restart=always
+RestartSec=5
+User=root
+# discovery needs to read /var/spool/cron + journal; least-privilege: read-only FS, no new privs
+ProtectSystem=strict
+ReadWritePaths=/var/lib/cronsentinel /etc/cronsentinel
+ProtectHome=read-only
+NoNewPrivileges=true
+PrivateTmp=true
+MemoryMax=128M
+CPUQuota=20%
+
+[Install]
+WantedBy=multi-user.target

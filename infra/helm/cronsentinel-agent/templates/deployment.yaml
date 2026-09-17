@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: {{ include "csa.name" . }}, namespace: {{ .Release.Namespace }}}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: {{ include "csa.name" . }}}}
+  template:
+    metadata: {labels: {app: {{ include "csa.name" . }}}}
+    spec:
+      serviceAccountName: {{ include "csa.name" . }}
+      securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: agent
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          env:
+            - {name: CS_SERVER, value: {{ .Values.server | quote }}}
+            - {name: CS_CLUSTER_NAME, value: {{ .Values.clusterName | quote }}}
+            - {name: CS_INSECURE, value: {{ .Values.insecureSkipTLS | quote }}}
+            {{- if eq .Values.scope "namespaces" }}
+            - {name: CS_NAMESPACES, value: {{ join "," .Values.namespaces | quote }}}
+            {{- end }}
+            {{- if .Values.existingSecret }}
+            - {name: CS_AGENT_ID, valueFrom: {secretKeyRef: {name: {{ .Values.existingSecret }}, key: CS_AGENT_ID}}}
+            - {name: CS_AGENT_KEY, valueFrom: {secretKeyRef: {name: {{ .Values.existingSecret }}, key: CS_AGENT_KEY}}}
+            {{- else }}
+            - {name: CS_BOOTSTRAP_TOKEN, valueFrom: {secretKeyRef: {name: {{ include "csa.name" . }}-bootstrap, key: token}}}
+            {{- end }}
+          volumeMounts: [{name: state, mountPath: /var/lib/cronsentinel}]
+          resources: {{ toYaml .Values.resources | nindent 12 }}
+      volumes: [{name: state, emptyDir: {}}]

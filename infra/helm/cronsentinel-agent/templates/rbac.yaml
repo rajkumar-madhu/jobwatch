@@ -1,0 +1,27 @@
+{{- $rules := list (dict "apiGroups" (list "batch") "resources" (list "cronjobs" "jobs") "verbs" (list "get" "list" "watch")) (dict "apiGroups" (list "") "resources" (list "pods" "events" "nodes") "verbs" (list "get" "list" "watch")) }}
+{{- if eq .Values.scope "cluster" }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: {{ include "csa.name" . }}}
+rules: {{ toYaml $rules | nindent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: {{ include "csa.name" . }}}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: {{ include "csa.name" . }}}
+subjects: [{kind: ServiceAccount, name: {{ include "csa.name" . }}, namespace: {{ .Release.Namespace }}}]
+{{- else }}
+{{- range .Values.namespaces }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: {{ include "csa.name" $ }}, namespace: {{ . }}}
+rules: {{ toYaml $rules | nindent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: {{ include "csa.name" $ }}, namespace: {{ . }}}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: {{ include "csa.name" $ }}}
+subjects: [{kind: ServiceAccount, name: {{ include "csa.name" $ }}, namespace: {{ $.Release.Namespace }}}]
+{{- end }}
+{{- end }}

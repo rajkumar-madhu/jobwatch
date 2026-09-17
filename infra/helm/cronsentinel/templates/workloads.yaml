@@ -1,0 +1,23 @@
+{{- $r := . }}
+{{- range $w := list
+  (dict "name" "api" "image" $.Values.image.api "command" (list "uvicorn" "cronsentinel.main:app" "--host" "0.0.0.0" "--port" "8000") "port" 8000 "replicas" $.Values.replicas.api "resources" $.Values.resources.api)
+  (dict "name" "ingest" "image" $.Values.image.api "command" (list "uvicorn" "cronsentinel.ingest_main:app" "--host" "0.0.0.0" "--port" "8010") "port" 8010 "replicas" $.Values.replicas.ingest "resources" $.Values.resources.api)
+  (dict "name" "web" "image" $.Values.image.web "port" 3000 "replicas" $.Values.replicas.web "resources" $.Values.resources.api)
+  (dict "name" "exec-processor" "image" $.Values.image.api "command" (list "python" "-m" "cronsentinel.workers.exec_processor") "replicas" $.Values.replicas.execProcessor "resources" $.Values.resources.worker)
+  (dict "name" "reconciler" "image" $.Values.image.api "command" (list "python" "-m" "cronsentinel.workers.reconciler") "replicas" $.Values.replicas.reconciler "resources" $.Values.resources.worker)
+  (dict "name" "rule-engine" "image" $.Values.image.api "command" (list "python" "-m" "cronsentinel.workers.rule_engine") "replicas" $.Values.replicas.ruleEngine "resources" $.Values.resources.worker)
+  (dict "name" "notifier" "image" $.Values.image.api "command" (list "celery" "-A" "cronsentinel.celery_app.celery" "worker" "-Q" "notify" "--concurrency" "4") "replicas" $.Values.replicas.notifier "resources" $.Values.resources.worker)
+  (dict "name" "scorer" "image" $.Values.image.api "command" (list "python" "-m" "cronsentinel.workers.scorer") "replicas" $.Values.replicas.scorer "resources" $.Values.resources.worker)
+}}
+---
+{{ include "cs.deployment" (merge (dict "root" $r) $w) }}
+{{- end }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata: {name: {{ include "cs.fullname" . }}-migrate, namespace: {{ .Release.Namespace }}, annotations: {"helm.sh/hook": pre-install,pre-upgrade, "helm.sh/hook-delete-policy": hook-succeeded}}
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers: [{name: migrate, image: {{ .Values.image.api }}, command: ["alembic", "upgrade", "head"], envFrom: [{secretRef: {name: {{ include "cs.fullname" . }}-env}}]}]

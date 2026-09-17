@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {name: {{ .Release.Name }}-nats, namespace: {{ .Release.Namespace }}}
+spec:
+  serviceName: {{ .Release.Name }}-nats
+  replicas: {{ .Values.nats.replicas }}
+  selector: {matchLabels: {app: {{ .Release.Name }}-nats}}
+  template:
+    metadata: {labels: {app: {{ .Release.Name }}-nats}}
+    spec:
+      containers:
+        - name: nats
+          image: nats:2.10-alpine
+          args: ["-js", "-sd", "/data", "--cluster_name", "cs", "--cluster", "nats://0.0.0.0:6222", "--routes", "nats://{{ .Release.Name }}-nats-0.{{ .Release.Name }}-nats:6222,nats://{{ .Release.Name }}-nats-1.{{ .Release.Name }}-nats:6222,nats://{{ .Release.Name }}-nats-2.{{ .Release.Name }}-nats:6222"]
+          ports: [{containerPort: 4222}, {containerPort: 6222}]
+          volumeMounts: [{name: data, mountPath: /data}]
+  volumeClaimTemplates: [{metadata: {name: data}, spec: {accessModes: [ReadWriteOnce], resources: {requests: {storage: {{ .Values.nats.storage }}}}}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: {{ .Release.Name }}-nats, namespace: {{ .Release.Namespace }}}
+spec: {clusterIP: None, selector: {app: {{ .Release.Name }}-nats}, ports: [{name: client, port: 4222}, {name: cluster, port: 6222}]}

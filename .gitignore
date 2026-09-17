@@ -1,0 +1,19 @@
+# deps / build
+node_modules/
+.next/
+dist/
+*.egg-info/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+# env / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+# runtime
+/var/
+buffer.jsonl*
+agent.json
