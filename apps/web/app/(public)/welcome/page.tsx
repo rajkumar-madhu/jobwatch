@@ -35,7 +35,7 @@ function Pipeline() {
             <i className="pkt pkt-ok" /><i className="pkt pkt-bad" /><i className="pkt pkt-warn" />
           </div>
           {row.map((n, i) => (
-            <div key={n} className="node relative z-10 flex flex-col items-center gap-1 rounded-xl border border-line bg-panel px-2 py-3 text-center shadow-[0_1px_0_rgb(var(--line)),0_8px_20px_-12px_rgb(var(--ink)/.25)]">
+            <div key={n} className="node relative z-0 flex flex-col items-center gap-1 rounded-xl border border-line bg-panel px-2 py-3 text-center shadow-[0_1px_0_rgb(var(--line)),0_8px_20px_-12px_rgb(var(--ink)/.25)]">
               <span className="text-lg leading-none" aria-hidden>{NODE_ICONS[r * 4 + i]}</span><span className="text-xs font-medium">{n}</span>
             </div>))}
         </div>))}

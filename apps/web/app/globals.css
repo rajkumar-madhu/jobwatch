@@ -45,8 +45,8 @@ body { @apply bg-bg text-ink font-sans text-[13.5px] leading-[1.45] antialiased;
 .skeleton { @apply animate-pulse rounded bg-line/60; }
 
 /* Landing pipeline packets */
-.pipe-line { overflow: visible; }
-.pkt { position: absolute; top: -3px; width: 7px; height: 7px; border-radius: 50%; left: 0; animation: travel 5s linear infinite; }
+.pipe-line { overflow: visible; z-index: 20; }
+.pkt { position: absolute; z-index: 21; box-shadow: 0 0 0 3px rgb(var(--panel)); top: -3px; width: 7px; height: 7px; border-radius: 50%; left: 0; animation: travel 5s linear infinite; }
 .pkt-ok { background: rgb(var(--ok)); } .pkt-bad { background: rgb(var(--bad)); animation-delay: 1.7s; } .pkt-warn { background: rgb(var(--warn)); animation-delay: 3.4s; }
 .pipe-rev .pkt { animation-name: travel; }
 @keyframes travel { 0% { left: 0; opacity: 0 } 8% { opacity: 1 } 92% { opacity: 1 } 100% { left: 100%; opacity: 0 } }
