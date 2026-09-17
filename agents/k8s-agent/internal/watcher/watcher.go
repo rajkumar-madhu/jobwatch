@@ -1,5 +1,5 @@
 // Package watcher uses client-go informers on CronJobs, Jobs, Pods and Events and translates them into
-// CronSentinel discovery + execution events. Read-only; RBAC in the Helm chart grants get/list/watch only.
+// WeCrew JobWatch discovery + execution events. Read-only; RBAC in the Helm chart grants get/list/watch only.
 package watcher
 
 import (

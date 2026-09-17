@@ -1,4 +1,4 @@
-"""Mock CronSentinel API for UI review — demo data only, no DB."""
+"""Mock JobWatch API for UI review — demo data only, no DB."""
 import random, uuid
 from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI

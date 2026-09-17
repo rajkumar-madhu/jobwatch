@@ -58,9 +58,9 @@ def _send_telegram(cfg, title, body, p):
 
 def _send_webhook(cfg, title, body, p):
     raw = json.dumps({"event": "job.status.changed", "title": title, **p}).encode()
-    headers = {"Content-Type": "application/json", "User-Agent": "CronSentinel/0.1"}
+    headers = {"Content-Type": "application/json", "User-Agent": "JobWatch/0.1"}
     if cfg.get("secret"):
-        headers["X-CronSentinel-Signature"] = "sha256=" + hmac.new(cfg["secret"].encode(), raw, hashlib.sha256).hexdigest()
+        headers["X-WeCrew JobWatch-Signature"] = "sha256=" + hmac.new(cfg["secret"].encode(), raw, hashlib.sha256).hexdigest()
     httpx.post(cfg["url"], content=raw, headers=headers, timeout=10).raise_for_status()
 
 

@@ -61,7 +61,7 @@ export default function Welcome() {
   return (
     <main className="bg-[radial-gradient(60%_50%_at_50%_0%,rgb(var(--accent)/.08),transparent)]">
       <header className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
-        <span className="flex items-center gap-2 font-semibold"><span className="dot dot-healthy" />CronSentinel</span>
+        <span className="flex items-center gap-2 font-semibold"><span className="dot dot-healthy" />WeCrew JobWatch</span>
         <nav className="flex items-center gap-5 text-sm"><a href="#how" className="hidden sm:inline">How it works</a><a href="#pricing" className="hidden sm:inline">Pricing</a><Link href="/tools/cron" className="hidden sm:inline">Cron checker</Link><Link href="/login" className="btn">Sign in</Link></nav>
       </header>
 
@@ -123,7 +123,7 @@ export default function Welcome() {
         <h2 className="text-3xl font-semibold tracking-tight">Know before your users do.</h2>
         <Link href="/login" className="btn btn-primary mt-6 px-6 py-3 text-base">Start monitoring</Link>
       </section>
-      <footer className="border-t border-line px-6 py-6 text-center text-xs text-mute">CronSentinel · <Link href="/tools/cron">Cron checker</Link> · <Link href="/status/demo">Status page example</Link></footer>
+      <footer className="border-t border-line px-6 py-6 text-center text-xs text-mute">WeCrew JobWatch · <Link href="/tools/cron">Cron checker</Link> · <Link href="/status/demo">Status page example</Link></footer>
     </main>
   );
 }

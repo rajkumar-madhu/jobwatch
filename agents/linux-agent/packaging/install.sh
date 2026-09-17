@@ -13,4 +13,4 @@ mkdir -p /var/lib/cronsentinel /etc/cronsentinel
 /usr/local/bin/cronsentinel-agent enroll --server "$SERVER" --token "$TOKEN"
 curl -fsSL "$BASE/$VERSION/cronsentinel-agent.service" -o /etc/systemd/system/cronsentinel-agent.service
 systemctl daemon-reload && systemctl enable --now cronsentinel-agent
-echo "CronSentinel agent installed. Wrap jobs with: cs-run -- /path/to/script.sh"
+echo "JobWatch agent installed. Wrap jobs with: cs-run -- /path/to/script.sh"

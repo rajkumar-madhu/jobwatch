@@ -1,6 +1,6 @@
 apiVersion: v2
 name: cronsentinel
-description: CronSentinel platform (api, ingest, web, workers, NATS)
+description: JobWatch platform (api, ingest, web, workers, NATS)
 type: application
 version: 0.1.0
 appVersion: "0.1.0"

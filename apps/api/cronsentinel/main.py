@@ -1,4 +1,4 @@
-"""CronSentinel API service."""
+"""JobWatch API service."""
 import logging
 from contextlib import asynccontextmanager
 
@@ -31,7 +31,7 @@ async def lifespan(app: FastAPI):
         await app.state.nc.drain()
 
 
-app = FastAPI(title="CronSentinel API", version="0.1.0", lifespan=lifespan, docs_url="/docs", openapi_url="/openapi.json")
+app = FastAPI(title="JobWatch API", version="0.1.0", lifespan=lifespan, docs_url="/docs", openapi_url="/openapi.json")
 app.add_middleware(CORSMiddleware, allow_origins=[settings.web_public_url], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 for r in (jobs.router, executions.router, org.router, overview.router, alerting.router, incidents.router, agents.admin, logs.router, authr.router, status_pages.router, status_pages.public, k8s.router, topology.router, analytics.router, copilot.router, billing.router):
     app.include_router(r)

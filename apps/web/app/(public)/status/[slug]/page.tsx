@@ -25,7 +25,7 @@ export default function StatusPage() {
       <h2 className="mt-8 text-sm font-medium">Incidents, last 30 days</h2>
       {d.incidents.length === 0 ? <p className="mt-1 text-sm text-mute">None.</p> : <ul className="mt-1 rounded-lg border border-line">{d.incidents.map((i: any, k: number) => (
         <li key={k} className="border-b border-line px-4 py-2 text-sm last:border-0"><span className="font-medium">{i.title}</span><span className="ml-2 text-mute">{ts(i.started_at)}{i.resolved_at ? ` — resolved ${ago(i.resolved_at)}` : " — ongoing"}</span></li>))}</ul>}
-      <p className="mt-10 text-xs text-mute">Powered by CronSentinel</p>
+      <p className="mt-10 text-xs text-mute">Powered by WeCrew JobWatch</p>
     </main>
   );
 }

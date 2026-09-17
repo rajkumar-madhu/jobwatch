@@ -1,4 +1,4 @@
-# CronSentinel — Product & Platform Design Document
+# WeCrew JobWatch — Product & Platform Design Document
 
 Version: 0.1 (design baseline)
 Status: Draft for build kickoff
@@ -273,7 +273,7 @@ Limits enforced at job create, retention partition drop, feature flags per plan.
 
 ---
 
-## 9. Observability (of CronSentinel itself)
+## 9. Observability (of WeCrew JobWatch itself)
 
 Prometheus `/metrics`, OTel traces, JSON logs, `/healthz`, `/readyz`.
 Key SLIs: ingest p99 latency, NATS consumer lag, reconciler lag, notifier failure rate, DB query p95, worker restarts.
@@ -320,5 +320,5 @@ tests/              unit, api, integration, rbac, tenant-isolation, agent, e2e
 1. LLM endpoint for Copilot — which self-hosted model/serving stack.
 2. Bundle Keycloak in Helm chart or require external instance.
 3. Object storage default: MinIO bundled vs customer S3.
-4. Domain/brand: CronSentinel standalone vs WeCrew sub-product.
+4. Domain/brand: WeCrew JobWatch standalone vs WeCrew sub-product.
 5. Demo data: static seed vs synthetic generator running continuously.

@@ -1,4 +1,4 @@
-# CronSentinel
+# WeCrew JobWatch
 
 Multi-tenant SaaS for monitoring scheduled jobs — Linux cron, systemd timers, Kubernetes CronJobs, containers, CI pipelines, backups, scripts — with schedule-aware failure detection, alerting, incident correlation and an AI operations copilot.
 

@@ -53,5 +53,5 @@ export default function Onboarding() {
   );
 }
 function Wrap({ children }: { children: React.ReactNode }) {
-  return <main className="mx-auto max-w-xl px-6 py-14"><Link href="/welcome" className="mb-10 flex items-center gap-2 font-semibold"><span className="dot dot-healthy" />CronSentinel</Link>{children}</main>;
+  return <main className="mx-auto max-w-xl px-6 py-14"><Link href="/welcome" className="mb-10 flex items-center gap-2 font-semibold"><span className="dot dot-healthy" />WeCrew JobWatch</Link>{children}</main>;
 }

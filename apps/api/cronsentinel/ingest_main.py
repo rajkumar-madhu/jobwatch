@@ -1,4 +1,4 @@
-"""CronSentinel ingest tier — heartbeat endpoints only, scaled independently."""
+"""WeCrew JobWatch ingest tier — heartbeat endpoints only, scaled independently."""
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -19,7 +19,7 @@ async def lifespan(app: FastAPI):
         await app.state.nc.drain()
 
 
-app = FastAPI(title="CronSentinel Ingest", version="0.1.0", lifespan=lifespan, docs_url=None)
+app = FastAPI(title="JobWatch Ingest", version="0.1.0", lifespan=lifespan, docs_url=None)
 app.include_router(heartbeat.router)
 app.include_router(agents.agent)
 app.include_router(k8s.agent)
