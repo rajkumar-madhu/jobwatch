@@ -220,3 +220,29 @@ provider over real HTTP + Redis + DB), `tests/integration/test_stripe_webhook.py
 - A live Keycloak server (flow proven against a fake provider) and a live Stripe account.
 - `nats` outbound destination kind still raises not-implemented.
 - `events.connect()` retries forever: a bad NATS_URL hangs a worker silently.
+
+## R8 — the three flagged gaps
+
+New: `cronsentinel/keys.py` (HKDF purpose-derived subkeys), `cronsentinel/csrf.py`,
+`scripts/reencrypt_configs.py`, bounded reconnect + `is_connected()` in `events.py`, `/readyz`
+returning 503 when NATS is down, web `lib/api.ts` sending `X-CSRF-Token` from an in-memory token.
+
+Tests: `tests/test_keys_csrf.py` (11 pure), `tests/integration/test_csrf_enforcement.py` (6),
+`tests/integration/test_nats_resilience.py` (3). **121 tests green**; web build passes.
+
+### Two more real bugs found while testing
+1. `audit()` wrote `request.client.host` into an `inet` column — a non-address value failed the
+   whole write it was attached to, not just the audit row.
+2. R4's integrations router called `audit()` with the wrong signature; every signal-destination
+   create/update/delete would have 500'd. No test had exercised those endpoints.
+
+### Deploy order for R8
+1. Stop the API/workers.
+2. `python scripts/reencrypt_configs.py` (old key → new derived key; idempotent).
+3. Deploy. Sessions are invalidated by the key change — users sign in again.
+
+### Still not verified
+- Go agents (R1, on a real host); K8s agent heartbeat_interval_s.
+- A live Keycloak server and a live Stripe account.
+- `nats` outbound destination kind still raises not-implemented.
+- CSRF token rotation on privilege change (role change keeps a valid token until TTL).

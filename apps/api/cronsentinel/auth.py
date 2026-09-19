@@ -1,4 +1,5 @@
 """Auth: Keycloak OIDC bearer (users) or X-API-Key (machines). RBAC via role ordering."""
+import ipaddress
 import secrets
 from dataclasses import dataclass
 from uuid import UUID
@@ -97,6 +98,9 @@ def current_principal(
         with system_session() as s:
             role = s.execute(text("SELECT role FROM memberships WHERE user_id=:u AND org_id=:o"), {"u": sd["uid"], "o": sd["org_id"]}).scalar()
         if not role: raise HTTPException(403, "not a member")
+        # R8: cookie auth is the only browser-drivable path, so it is the only one that needs CSRF.
+        from . import csrf
+        csrf.enforce(request, sd["sub"])
         p = Principal(org_id=UUID(sd["org_id"]), role=role, user_id=UUID(sd["uid"]))
         ratelimit.check(f"user:{p.user_id}", settings.api_rate_per_min, request)
         return p
@@ -117,9 +121,23 @@ def require_role(role: str):
     return dep
 
 
+def _inet(ip: str | None) -> str | None:
+    """audit_logs.ip is `inet`. Starlette's request.client.host is not always an address — it is
+    "testclient" under TestClient, and can be a hostname or a unix-socket path depending on the
+    server and proxy in front. Feeding that straight in raised InvalidTextRepresentation and
+    failed the *whole write* the audit entry was attached to, so a logging concern could 500 a
+    job creation. Store NULL rather than lose the operation."""
+    if not ip:
+        return None
+    try:
+        return str(ipaddress.ip_address(ip.strip().strip("[]").split("%")[0]))
+    except ValueError:
+        return None
+
+
 def audit(s, p: Principal, action: str, target_type: str, target_id: str, payload: dict | None = None, ip: str | None = None):
     s.execute(text(
         "INSERT INTO audit_logs (org_id, actor_id, actor_type, action, target_type, target_id, ip, payload) "
         "VALUES (:org, :actor, :atype, :action, :tt, :tid, :ip, CAST(:payload AS jsonb))"),
         {"org": str(p.org_id), "actor": str(p.user_id or p.api_key_id), "atype": "user" if p.user_id else "api_key",
-         "action": action, "tt": target_type, "tid": target_id, "ip": ip, "payload": __import__("json").dumps(payload or {})})
+         "action": action, "tt": target_type, "tid": target_id, "ip": _inet(ip), "payload": __import__("json").dumps(payload or {})})

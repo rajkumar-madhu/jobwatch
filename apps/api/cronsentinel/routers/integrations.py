@@ -77,7 +77,7 @@ def create_destination(body: DestinationIn, request: Request, p: Principal = Dep
             VALUES (:o, :n, :k, :c, :et, :ws, :en) RETURNING id"""),
             {"o": str(p.org_id), "n": body.name, "k": body.kind, "c": encrypt_json(cfg), "et": body.event_types,
              "ws": [str(w) for w in body.workspace_ids], "en": body.enabled}).first()
-        audit(s, p, "integration.destination.create", {"id": str(r.id), "kind": body.kind}, request)
+        audit(s, p, "integration.destination.create", "signal_destination", str(r.id), {"kind": body.kind}, request.client.host if request.client else None)
         return {"id": str(r.id)}
 
 
@@ -94,7 +94,7 @@ def update_destination(dest_id: UUID, body: DestinationIn, request: Request, p: 
             {"n": body.name, "k": body.kind, "c": encrypt_json(cfg), "et": body.event_types, "ws": [str(w) for w in body.workspace_ids],
              "en": body.enabled, "id": str(dest_id)}).rowcount
         if not n: raise HTTPException(404)
-        audit(s, p, "integration.destination.update", {"id": str(dest_id)}, request)
+        audit(s, p, "integration.destination.update", "signal_destination", str(dest_id), None, request.client.host if request.client else None)
         return {"ok": True}
 
 
@@ -102,7 +102,7 @@ def update_destination(dest_id: UUID, body: DestinationIn, request: Request, p: 
 def delete_destination(dest_id: UUID, request: Request, p: Principal = Depends(require_role("devops"))):
     with tenant_session(p.org_id) as s:
         if not s.execute(text("DELETE FROM signal_destinations WHERE id=:id"), {"id": str(dest_id)}).rowcount: raise HTTPException(404)
-        audit(s, p, "integration.destination.delete", {"id": str(dest_id)}, request)
+        audit(s, p, "integration.destination.delete", "signal_destination", str(dest_id), None, request.client.host if request.client else None)
 
 
 @router.post("/destinations/{dest_id}/test")

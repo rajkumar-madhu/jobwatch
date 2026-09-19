@@ -4,7 +4,7 @@ import time as _time
 from contextlib import asynccontextmanager
 
 import structlog
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
@@ -80,9 +80,15 @@ def healthz():
 
 @app.get("/readyz")
 def readyz():
+    """R8: `js is not None` stayed true after the broker went away, so the pod kept serving Ready
+    while nothing could be published. Report the live connection state instead, and fail the probe
+    when the broker is unreachable so traffic is shed rather than silently dropped."""
     with engine.connect() as c:
         c.execute(text("SELECT 1"))
-    return {"status": "ready", "nats": app.state.js is not None}
+    nats_ok = app.state.js is not None and events.is_connected()
+    if not nats_ok:
+        raise HTTPException(503, "nats unavailable")
+    return {"status": "ready", "nats": True}
 
 
 @app.get("/metrics")

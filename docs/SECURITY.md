@@ -50,3 +50,40 @@ the event id is **not** recorded — so a corrected retry is still processed rat
 - Refresh tokens are not stored; sessions simply expire at `SESSION_TTL_S`.
 - Keycloak itself is still unverified against a live server — the flow is proven against a fake
   provider that implements discovery, JWKS and the token endpoint.
+
+## R8 — key separation, CSRF, fail-fast broker
+
+### Purpose-derived keys (`cronsentinel/keys.py`)
+One secret was signing session cookies *and* encrypting channel/destination configs. HKDF-SHA256
+over `SECRET_ENCRYPTION_KEY` now yields a distinct subkey per purpose (`session-cookie`,
+`csrf-token`, `config-encryption`). A token forged with the session key no longer validates as a
+CSRF token — `test_csrf_token_signed_with_the_session_key_is_rejected` is exactly that check, and
+it only passes because the keys differ.
+
+**Upgrade step:** config ciphertext written before R8 used `sha256(SECRET_ENCRYPTION_KEY)` and will
+not decrypt. Run `python scripts/reencrypt_configs.py` (idempotent, `--dry-run` supported) with the
+API stopped, before deploying R8. Existing session cookies are invalidated — users sign in again.
+
+### CSRF (`cronsentinel/csrf.py`)
+SameSite=Lax is a browser-side default with gaps: embedded webviews, relaxed settings, and — the
+real one — a **same-site subdomain** attacker, for whom the cookie is not cross-site at all.
+`/auth/session` now returns a `csrf_token` signed with its own subkey and bound to the session's
+`sub`; cookie-authenticated writes must echo it in `X-CSRF-Token`. Enforced centrally in
+`current_principal`, plus explicitly on `/auth/orgs` and `/auth/switch`, which bypass it. API-key
+and bearer requests are exempt — browsers do not attach those automatically, so requiring a token
+would break every script without adding safety. The SPA keeps the token **in memory only**
+(localStorage would hand it to the XSS the token exists to contain) and refreshes once on a 403.
+
+### Fail-fast on an unreachable broker
+`events.connect()` defaulted to `max_reconnect_attempts=-1`: a typo'd `NATS_URL` left a worker
+parked inside `await connect()` — Ready, silent, processing nothing. Now bounded (30 attempts × 2s)
+so the supervisor restarts it visibly, with connection callbacks feeding `is_connected()`.
+`/readyz` previously reported `js is not None`, which stayed true after the broker vanished; it now
+returns 503 when the connection is actually down, so traffic is shed instead of dropped.
+
+### Also fixed
+`audit()` wrote `request.client.host` into an `inet` column. Any non-address value — a hostname, a
+unix socket, `testclient` — raised `InvalidTextRepresentation` and failed the **entire write** the
+audit call was attached to, so a logging concern could 500 a job creation. Non-addresses are now
+stored as NULL. The R4 integrations router also called `audit()` with the wrong signature, which
+would have 500'd every signal-destination write.

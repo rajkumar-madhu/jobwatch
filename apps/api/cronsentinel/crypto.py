@@ -1,14 +1,15 @@
-"""Envelope-ish symmetric encryption for channel/integration configs. Key from SECRET_ENCRYPTION_KEY.
-TODO Phase 6: per-org data keys wrapped by KMS."""
-import base64
-import hashlib
+"""Symmetric encryption for channel/integration configs. Key derived from SECRET_ENCRYPTION_KEY
+for the 'config-encryption' purpose only (R8). TODO Phase 6: per-org data keys wrapped by KMS."""
 import json
 
 from cryptography.fernet import Fernet
 
-from .config import settings
+from .keys import fernet_key
 
-_f = Fernet(base64.urlsafe_b64encode(hashlib.sha256(settings.secret_encryption_key.encode()).digest()))
+# R8: purpose-derived subkey, not the raw root secret — see cronsentinel/keys.py.
+# NOTE: this changes the key for existing ciphertext. Rows encrypted before R8 must be re-encrypted
+# with scripts/reencrypt_configs.py or they will fail to decrypt.
+_f = Fernet(fernet_key("config-encryption"))
 
 
 def encrypt_json(d: dict) -> bytes:

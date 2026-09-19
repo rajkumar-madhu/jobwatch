@@ -14,7 +14,10 @@ from pydantic import BaseModel
 from sqlalchemy import text
 
 from ..config import settings
+from ..csrf import enforce as enforce_csrf
+from ..csrf import issue as issue_csrf
 from ..db import system_session
+from ..keys import signing_key
 from ..oidc import IdTokenError, fetch_jwks, verify_id_token
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -30,13 +33,13 @@ def _discovery():
 
 
 def sign_session(claims: dict) -> str:
-    return jwt.encode({**claims, "iat": int(time.time()), "exp": int(time.time()) + settings.session_ttl_s}, settings.secret_encryption_key, algorithm="HS256")
+    return jwt.encode({**claims, "iat": int(time.time()), "exp": int(time.time()) + settings.session_ttl_s}, signing_key("session-cookie"), algorithm="HS256")
 
 
 def read_session(request: Request) -> dict | None:
     tok = request.cookies.get(COOKIE)
     if not tok: return None
-    try: return jwt.decode(tok, settings.secret_encryption_key, algorithms=["HS256"])
+    try: return jwt.decode(tok, signing_key("session-cookie"), algorithms=["HS256"])
     except Exception: return None
 
 
@@ -104,7 +107,9 @@ def session(request: Request):
     if not s: raise HTTPException(401, "not signed in")
     with system_session() as db:
         orgs = [dict(r._mapping) for r in db.execute(text("SELECT o.id, o.name, o.slug, o.plan, m.role FROM memberships m JOIN organizations o ON o.id=m.org_id WHERE m.user_id=:u"), {"u": s["uid"]}).all()]
-    return {"user": {"id": s["uid"], "email": s["email"], "name": s.get("name")}, "org_id": s.get("org_id"), "orgs": orgs}
+    # csrf_token is the SPA's double-submit value; it must be echoed in X-CSRF-Token on writes.
+    return {"user": {"id": s["uid"], "email": s["email"], "name": s.get("name")}, "org_id": s.get("org_id"),
+            "orgs": orgs, "csrf_token": issue_csrf(s["sub"])}
 
 
 class CreateOrg(BaseModel):
@@ -116,6 +121,7 @@ def create_org(body: CreateOrg, request: Request):
     """Onboarding step 1: create workspace/org for the signed-in user; becomes owner."""
     s = read_session(request)
     if not s: raise HTTPException(401)
+    enforce_csrf(request, s["sub"])   # cookie POST that bypasses current_principal
     slug = "".join(c if c.isalnum() else "-" for c in body.name.lower()).strip("-")[:40] + "-" + secrets.token_hex(2)
     with system_session() as db:
         oid = db.execute(text("INSERT INTO organizations (name, slug) VALUES (:n, :s) RETURNING id"), {"n": body.name, "s": slug}).scalar()
@@ -132,6 +138,7 @@ def create_org(body: CreateOrg, request: Request):
 def switch_org(org_id: str, request: Request):
     s = read_session(request)
     if not s: raise HTTPException(401)
+    enforce_csrf(request, s["sub"])   # cookie POST that bypasses current_principal
     with system_session() as db:
         if not db.execute(text("SELECT 1 FROM memberships WHERE user_id=:u AND org_id=:o"), {"u": s["uid"], "o": org_id}).first(): raise HTTPException(403)
     resp = Response(status_code=204); _set_cookie(resp, sign_session({**{k: s[k] for k in ("sub", "uid", "email", "name")}, "org_id": org_id})); return resp

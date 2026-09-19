@@ -4,9 +4,36 @@ export const API = process.env.NEXT_PUBLIC_API_URL!;
 export function getKey(): string | null { return typeof window === "undefined" ? null : localStorage.getItem("cs_api_key"); }
 export function setKey(k: string) { localStorage.setItem("cs_api_key", k); }
 
+// R8: cookie-authenticated writes need the double-submit CSRF token from /auth/session.
+// Kept in memory only — putting it in localStorage would hand it to any XSS, which is the
+// attacker the token is meant to stop.
+let csrf: string | null = null;
+export function setCsrf(t: string | null) { csrf = t; }
+export function getCsrf() { return csrf; }
+
+async function refreshCsrf(): Promise<string | null> {
+  try {
+    const r = await fetch(`${API}/auth/session`, { credentials: "include" });
+    if (!r.ok) return null;
+    csrf = (await r.json()).csrf_token ?? null;
+    return csrf;
+  } catch { return null; }
+}
+
+const SAFE = ["GET", "HEAD", "OPTIONS"];
+
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const key = getKey();
-  const res = await fetch(`${API}${path}`, { ...init, credentials: "include", headers: { "Content-Type": "application/json", ...(key ? { "X-API-Key": key } : {}), ...(init.headers || {}) } });
+  const method = (init.method ?? "GET").toUpperCase();
+  const needsCsrf = !key && !SAFE.includes(method);
+  if (needsCsrf && !csrf) await refreshCsrf();
+  const send = (tok: string | null) => fetch(`${API}${path}`, { ...init, credentials: "include", headers: {
+    "Content-Type": "application/json", ...(key ? { "X-API-Key": key } : {}), ...(tok ? { "X-CSRF-Token": tok } : {}), ...(init.headers || {}) } });
+  let res = await send(needsCsrf ? csrf : null);
+  if (res.status === 403 && needsCsrf) {   // token expired mid-session: refresh once and retry
+    const fresh = await refreshCsrf();
+    if (fresh) res = await send(fresh);
+  }
   if (res.status === 401) throw new ApiError(401, "Not signed in. Sign in with your account or add an API key in Settings.");
   if (!res.ok) { let msg = res.statusText; try { msg = (await res.json()).detail ?? msg; } catch {} throw new ApiError(res.status, String(msg)); }
   return res.status === 204 ? (undefined as T) : res.json();
