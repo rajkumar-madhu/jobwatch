@@ -1,4 +1,6 @@
-from cronsentinel.state_machine import Event as E, JobStatus as S, transition as t
+from cronsentinel.state_machine import Event as E
+from cronsentinel.state_machine import JobStatus as S
+from cronsentinel.state_machine import transition as t
 
 
 def test_happy_path():

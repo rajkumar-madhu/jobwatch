@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from cronsentinel import schedule
 
@@ -13,7 +13,7 @@ def test_validate():
 
 
 def test_next_run_tz():
-    base = datetime(2026, 3, 8, 6, 0, tzinfo=timezone.utc)
+    base = datetime(2026, 3, 8, 6, 0, tzinfo=UTC)
     n = schedule.next_run("0 2 * * *", "America/New_York", base)
     assert n.hour in (6, 7)  # DST boundary day: 2am local == 06/07 UTC
 

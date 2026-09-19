@@ -1,6 +1,6 @@
 """Pure-logic checks for correlation matching (DB-free via fakes)."""
-import json
 from types import SimpleNamespace
+
 from cronsentinel.alerting import correlation as C
 
 

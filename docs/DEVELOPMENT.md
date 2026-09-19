@@ -170,3 +170,29 @@ Also: `FOR UPDATE` on an outer join, enum/text ambiguous params, reconciler not 
 - Go agents (R1). K8s agent heartbeat_interval_s.
 - NATS consumers end-to-end (harness calls `tick()` directly). Celery real broker (task run with `.apply()`).
 - Keycloak flow, Stripe webhook against a live account.
+
+## R6 — NATS + Celery end-to-end
+
+`tests/integration/test_pipeline_nats.py` (4) drives the real workers against a real JetStream:
+exec event -> exec-processor -> executions row + jobstatus payload; failure -> rule-engine -> incident;
+UNKNOWN suppressed across the transport; duplicate delivery idempotent. Worker loops were split into
+`subscribe()` / `drain()` so the harness steps them deterministically instead of racing a task.
+`tests/integration/test_celery_redis.py` (2) enqueues over real Redis and runs a worker subprocess
+against a throwaway HTTP receiver. CI gained redis + nats services. 73 tests green.
+
+### Three more real bugs found
+1. `exec-processor` published a jobstatus payload with no `org_id` -> `handle_status_change` KeyError
+   on every execution-driven status change. Payload is now the documented contract.
+2. Both subjects lived on one WORK_QUEUE stream -> R4's outbound-exporter could not start
+   (`filtered consumer not unique on workqueue stream`) and would have stolen the rule engine's
+   messages. Split into CS_EXEC (work-queue) and CS_STATUS (interest).
+3. The processor never wrote `job_state`, so after a real failure the job stayed `unknown` and
+   UNKNOWN-suppression ate the alert. State derivation moved to `cronsentinel/job_state.py`, called
+   by both producers.
+
+### Still not verified
+- Go agents (R1, on a real host). K8s agent heartbeat_interval_s.
+- Keycloak auth flow; Stripe webhook against a live account.
+- `nats` outbound destination kind (still raises not-implemented).
+- `events.connect()` retries forever by default: a bad NATS_URL hangs a worker silently rather than
+  crash-looping. Consider max_reconnect_attempts + a readiness probe.

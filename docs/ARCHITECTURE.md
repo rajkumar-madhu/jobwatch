@@ -79,3 +79,31 @@ the alert belongs to the agent, once, not to N jobs.
   still a stub (unchanged from Phase 2).
 - `agent_offline` uses a fixed 10-minute threshold; should be per-agent, derived from its reported
   heartbeat interval.
+
+## R6 — messaging topology
+
+Two JetStream streams, not one:
+
+| stream | subjects | retention | consumers |
+|---|---|---|---|
+| `CS_EXEC` | `exec.>` | WORK_QUEUE | `exec-processor` only (scale by adding workers on the same durable) |
+| `CS_STATUS` | `jobstatus.>` | INTEREST | `rule-engine`, `outbound-exporter`, and any future subscriber |
+
+A WORK_QUEUE stream allows **one** filtered consumer per subject and deletes a message as soon as
+any consumer acks it. With both subjects on one work-queue stream, R4's outbound-exporter failed to
+start (`filtered consumer not unique on workqueue stream`) and, had it started, would have stolen
+status messages from the rule engine. Found by the R6 pipeline harness; `events.ensure_streams`
+creates both and attempts `update_stream` so a pre-split deployment repairs itself on restart.
+
+### One place derives job state
+`cronsentinel/job_state.py::recompute_state` is called by **both** producers on `jobstatus.*` —
+the reconciler (slot timeouts) and the processor (an execution arriving). Previously the processor
+wrote only the legacy `status` column, so a genuinely failing job kept `job_state = 'unknown'` and
+UNKNOWN-suppression dropped its alert. Jobs with no slots (heartbeat-only, ad-hoc) fall back to
+their last execution so their state is still derivable; they simply can never be LATE or MISSED.
+
+### jobstatus.* payload contract
+Both producers emit: `org_id, job_id, execution_id?, prev_status, new_status, prev_state,
+new_state, unknown_reason, consecutive_failures, occurred_at`. The rule engine reads `org_id` and
+the state fields; the outbound exporter maps it to `job.state_changed`. Before R6 the processor
+omitted `org_id` entirely, so every status change from an execution crashed the rule engine.

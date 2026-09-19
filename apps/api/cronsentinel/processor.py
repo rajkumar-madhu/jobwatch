@@ -111,4 +111,18 @@ def process(s, ev: dict) -> dict | None:
         ), late_marked_at=NULL WHERE id=:id"""), {"id": job_id})
 
     s.execute(text("UPDATE jobs SET status=:st, updated_at=now() WHERE id=:id"), {"st": new.value, "id": job_id})
-    return {"job_id": job_id, "execution_id": exec_id, "prev_status": prev.value, "new_status": new.value}
+    # R6: the processor is the other producer on jobstatus.* — it must persist the four-state too,
+    # or a real failure keeps job_state='unknown' and UNKNOWN-suppression drops its alert.
+    from .job_state import recompute_state
+    recompute_state(s, job_id, org)
+
+    # The status-change payload is the wire contract for jobstatus.* — the rule engine and the
+    # outbound exporter both read org_id and the four-state fields off it. Keep it in sync with
+    # reconciler.recompute_state's event, which is the other producer on this subject.
+    jb = s.execute(text("SELECT job_state::text, unknown_reason, consecutive_failures FROM jobs WHERE id=:id"), {"id": job_id}).first()
+    return {"org_id": str(org), "job_id": str(job_id), "execution_id": exec_id,
+            "prev_status": prev.value, "new_status": new.value,
+            "prev_state": None, "new_state": jb.job_state if jb else None,
+            "unknown_reason": jb.unknown_reason if jb else None,
+            "consecutive_failures": jb.consecutive_failures if jb else 0,
+            "occurred_at": server_ts.isoformat()}

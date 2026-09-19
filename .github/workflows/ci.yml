@@ -5,8 +5,9 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres: {image: postgres:16-alpine, env: {POSTGRES_USER: cronsentinel, POSTGRES_PASSWORD: cronsentinel, POSTGRES_DB: cronsentinel}, ports: ["5432:5432"], options: --health-cmd pg_isready --health-interval 5s --health-retries 10}
-      redis: {image: redis:7-alpine, ports: ["6379:6379"]}
-    env: {DATABASE_URL: postgresql+psycopg://cronsentinel:cronsentinel@localhost:5432/cronsentinel, REDIS_URL: redis://localhost:6379/0}
+      redis: {image: "redis:7-alpine", ports: ["6379:6379"]}
+      nats: {image: "nats:2.10-alpine", ports: ["4222:4222"], options: --entrypoint "/nats-server -js"}
+    env: {DATABASE_URL: postgresql+psycopg://cronsentinel:cronsentinel@localhost:5432/cronsentinel, JOBWATCH_APP_DB_PASSWORD: app}   # owner URL: migrations only; the test step overrides it with the app role
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -16,7 +17,11 @@ jobs:
       - run: cd apps/api && JOBWATCH_APP_DB_PASSWORD=app alembic upgrade head
       - run: cd apps/api && alembic downgrade base && JOBWATCH_APP_DB_PASSWORD=app alembic upgrade head   # full chain must be reversible
       - run: cd apps/api && pytest -q
-        env: {DATABASE_URL: "postgresql+psycopg://jobwatch_app:app@localhost:5432/cronsentinel", SECRET_ENCRYPTION_KEY: ci-only-not-a-secret}
+        env:
+          DATABASE_URL: "postgresql+psycopg://jobwatch_app:app@localhost:5432/cronsentinel"
+          SECRET_ENCRYPTION_KEY: ci-only-not-a-secret
+          REDIS_URL: "redis://localhost:6379/0"
+          NATS_URL: "nats://localhost:4222"
   web:
     runs-on: ubuntu-latest
     steps:

@@ -1,5 +1,7 @@
 """Requires live Postgres (DATABASE_URL). Skipped otherwise."""
-import os, uuid
+import os
+import uuid
+
 import pytest
 from sqlalchemy import text
 

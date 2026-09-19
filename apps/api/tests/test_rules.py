@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from cronsentinel.alerting import rules as R
 
@@ -25,14 +25,14 @@ def test_conditions():
 
 def test_business_hours():
     bh = {"tz": "Asia/Kolkata", "days": [1, 2, 3, 4, 5], "start": "09:00", "end": "18:00"}
-    assert R.in_business_hours(bh, datetime(2026, 9, 14, 5, 0, tzinfo=timezone.utc))   # Mon 10:30 IST
-    assert not R.in_business_hours(bh, datetime(2026, 9, 13, 5, 0, tzinfo=timezone.utc))  # Sun
-    assert not R.in_business_hours(bh, datetime(2026, 9, 14, 15, 0, tzinfo=timezone.utc))  # 20:30 IST
-    assert R.in_business_hours(None, datetime.now(timezone.utc))
+    assert R.in_business_hours(bh, datetime(2026, 9, 14, 5, 0, tzinfo=UTC))   # Mon 10:30 IST
+    assert not R.in_business_hours(bh, datetime(2026, 9, 13, 5, 0, tzinfo=UTC))  # Sun
+    assert not R.in_business_hours(bh, datetime(2026, 9, 14, 15, 0, tzinfo=UTC))  # 20:30 IST
+    assert R.in_business_hours(None, datetime.now(UTC))
 
 
 def test_flapping_and_repeat():
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     ts = [now - timedelta(minutes=m) for m in (1, 3, 5)]
     assert R.is_flapping(ts, now)
     assert not R.is_flapping(ts[:2], now)

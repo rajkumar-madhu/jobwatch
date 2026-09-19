@@ -40,7 +40,7 @@ def _job(s, job_id):
 
 
 async def consume_jobstatus(js):
-    sub = await js.pull_subscribe("jobstatus.>", durable="outbound-exporter")
+    sub = await js.pull_subscribe("jobstatus.>", durable="outbound-exporter", stream=events.STREAM_STATUS)
     while True:
         try:
             msgs = await sub.fetch(50, timeout=5)
