@@ -87,3 +87,34 @@ unix socket, `testclient` — raised `InvalidTextRepresentation` and failed the 
 audit call was attached to, so a logging concern could 500 a job creation. Non-addresses are now
 stored as NULL. The R4 integrations router also called `audit()` with the wrong signature, which
 would have 500'd every signal-destination write.
+
+## R10 — RBAC matrix
+
+Role ladder: `viewer < developer < sre < devops < admin < owner`.
+
+`tests/integration/test_rbac_matrix.py` asserts the full grid for all 32 gated write endpoints:
+every role **below** the threshold gets 403, and the lowest permitted role is **not** refused. The
+required role is read off the live dependency graph, so an endpoint that ships without
+`require_role(...)` fails `test_roles_below_the_threshold_are_refused` rather than passing
+silently. Two endpoints are ungated on purpose and listed with reasons (`/billing/webhook`, which
+is authenticated by Stripe signature; `/jobs/schedule/preview`, a pure cron utility).
+
+Also asserted: the role comes from the key, not from a request header; a key cannot touch another
+tenant's objects (404 via RLS, never 200); a revoked key is 401.
+
+### Behaviour change
+`POST /api/v1/copilot/ask` had **no** role gate, so a viewer could spend LLM budget and plan usage
+on every question. It now requires `developer`. `/copilot/history` and `/copilot/suggestions`
+remain readable by viewers. If you want viewers to be able to ask, lower this deliberately rather
+than by omission.
+
+### Two more 500s
+`DELETE /api/v1/api-keys/{key_id}` and `POST /auth/switch/{org_id}` typed their path parameter as
+`str`, so a malformed id reached Postgres and raised `invalid input syntax for type uuid` → 500.
+Both are now `UUID`, giving a 422. (`execution_id` stays `str` — those are agent-minted ULIDs.)
+
+### Still open
+- Depth, not breadth: the matrix proves who may call what, not that each handler's business rules
+  are right.
+- `PATCH /api/v1/jobs/{id}` cannot change a job's `name` — not a bug, but there is no rename API.
+- Role changes do not invalidate an existing CSRF token or session until TTL.

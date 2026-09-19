@@ -4,6 +4,7 @@ import json
 import secrets
 import time
 from urllib.parse import urlencode
+from uuid import UUID
 
 import httpx
 import redis
@@ -135,10 +136,10 @@ def create_org(body: CreateOrg, request: Request):
 
 
 @router.post("/switch/{org_id}")
-def switch_org(org_id: str, request: Request):
+def switch_org(org_id: UUID, request: Request):
     s = read_session(request)
     if not s: raise HTTPException(401)
     enforce_csrf(request, s["sub"])   # cookie POST that bypasses current_principal
     with system_session() as db:
-        if not db.execute(text("SELECT 1 FROM memberships WHERE user_id=:u AND org_id=:o"), {"u": s["uid"], "o": org_id}).first(): raise HTTPException(403)
-    resp = Response(status_code=204); _set_cookie(resp, sign_session({**{k: s[k] for k in ("sub", "uid", "email", "name")}, "org_id": org_id})); return resp
+        if not db.execute(text("SELECT 1 FROM memberships WHERE user_id=:u AND org_id=:o"), {"u": s["uid"], "o": str(org_id)}).first(): raise HTTPException(403)
+    resp = Response(status_code=204); _set_cookie(resp, sign_session({**{k: s[k] for k in ("sub", "uid", "email", "name")}, "org_id": str(org_id)})); return resp

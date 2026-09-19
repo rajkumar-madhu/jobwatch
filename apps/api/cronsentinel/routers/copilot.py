@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 
 from .. import ratelimit
-from ..auth import Principal, current_principal
+from ..auth import Principal, current_principal, require_role
 from ..config import settings
 from ..copilot import context, llm
 from ..db import tenant_session
@@ -23,7 +23,7 @@ class AskIn(BaseModel):
 
 
 @router.post("/ask")
-def ask(body: AskIn, p: Principal = Depends(current_principal)):
+def ask(body: AskIn, p: Principal = Depends(require_role("developer"))):
     with tenant_session(p.org_id) as s:
         feats = s.execute(text("SELECT pl.features FROM organizations o JOIN plan_limits pl ON pl.plan=o.plan WHERE o.id=:o"), {"o": str(p.org_id)}).scalar() or []
         if "ai" not in feats and "all" not in feats: raise HTTPException(402, "AI diagnostics require the Team plan or higher")

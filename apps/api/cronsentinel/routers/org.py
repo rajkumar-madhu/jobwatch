@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import text
@@ -62,11 +64,11 @@ def create_key(body: ApiKeyIn, request: Request, p: Principal = Depends(require_
 
 
 @router.delete("/api-keys/{key_id}", status_code=204)
-def revoke_key(key_id: str, request: Request, p: Principal = Depends(require_role("admin"))):
+def revoke_key(key_id: UUID, request: Request, p: Principal = Depends(require_role("admin"))):
     with tenant_session(p.org_id) as s:
-        n = s.execute(text("UPDATE api_keys SET revoked_at=now() WHERE id=:id AND revoked_at IS NULL"), {"id": key_id}).rowcount
+        n = s.execute(text("UPDATE api_keys SET revoked_at=now() WHERE id=:id AND revoked_at IS NULL"), {"id": str(key_id)}).rowcount
         if not n: raise HTTPException(404)
-        audit(s, p, "api_key.revoke", "api_key", key_id, ip=request.client.host)
+        audit(s, p, "api_key.revoke", "api_key", str(key_id), ip=request.client.host)
 
 
 @router.get("/audit-logs")

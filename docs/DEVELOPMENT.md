@@ -282,3 +282,27 @@ before the lifespan handler finished raised AttributeError → 500 instead of re
 - Smoke coverage is breadth, not depth: it proves an endpoint responds sanely, not that its
   business logic is right. RBAC is only checked at the unauthenticated boundary — per-role
   permission matrices (viewer cannot delete, etc.) are not yet tested.
+
+## R10 — RBAC matrix
+
+`tests/integration/test_rbac_matrix.py`: 32 gated write endpoints x 6 roles, derived from the live
+dependency graph so a missing `require_role()` fails the suite. Plus header-spoofing, cross-tenant
+writes (404 via RLS) and revoked keys. **319 tests green.**
+
+### Found
+- `POST /api/v1/copilot/ask` had no role gate — a viewer could spend LLM budget. Now `developer`
+  (deliberate behaviour change, see SECURITY.md).
+- `DELETE /api/v1/api-keys/{key_id}` and `POST /auth/switch/{org_id}` took `str` path params, so a
+  malformed id 500'd out of Postgres instead of 422ing at the edge.
+- Test-side: `maintenance_windows` has no `name` column and `PATCH /jobs` does not accept `name`;
+  both had been guessed rather than checked against the schema.
+
+### Suite runtime
+Full run is ~2m40s, dominated by the RBAC matrix (6 roles x 32 endpoints, each a real HTTP call
+against Postgres). Fine in CI; use `-k` locally.
+
+### Still not verified
+- Go agents (R1, on a real host); K8s agent heartbeat_interval_s.
+- A live Keycloak server and a live Stripe account.
+- `nats` outbound destination kind still raises not-implemented.
+- Handler-level business rules (the matrix is authorisation breadth, not logic depth).

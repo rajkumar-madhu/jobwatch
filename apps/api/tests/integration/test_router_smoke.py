@@ -111,7 +111,7 @@ BODIES = {
     ("POST", "/api/v1/integrations/destinations"): lambda s: {"name": "d", "kind": "webhook", "url": "https://aegis.test/i"},
     ("PUT", "/api/v1/integrations/destinations/{dest_id}"): lambda s: {"name": "d", "kind": "webhook", "url": "https://aegis.test/i"},
     ("POST", "/api/v1/incidents/{incident_id}/notes"): lambda s: {"body": "note"},
-    ("PATCH", "/api/v1/jobs/{job_id}"): lambda s: {"name": "renamed"},
+    ("PATCH", "/api/v1/jobs/{job_id}"): lambda s: {"description": "renamed"},  # NOTE: name is not patchable by design
     ("PATCH", "/api/v1/alerts/rules/{rule_id}"): lambda s: {"enabled": False},
 }
 
