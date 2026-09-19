@@ -2,7 +2,14 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import text
 
-from ..auth import Principal, audit, current_principal, generate_api_key, hash_secret, require_role
+from ..auth import (
+    Principal,
+    audit,
+    current_principal,
+    generate_api_key,
+    hash_secret,
+    require_role,
+)
 from ..db import tenant_session
 
 router = APIRouter(prefix="/api/v1", tags=["org"])

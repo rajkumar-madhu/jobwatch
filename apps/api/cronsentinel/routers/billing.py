@@ -1,5 +1,8 @@
 """Stripe-compatible subscription flow: checkout → webhook → plan on org. No Stripe SDK dependency (plain REST) so it runs without keys in dev."""
-import hashlib, hmac, json, time
+import hashlib
+import hmac
+import json
+import time
 
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Request

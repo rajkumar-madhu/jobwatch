@@ -11,7 +11,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: "3.12"}
-      - run: cd apps/api && pip install -e ".[dev]" && ruff check . && alembic upgrade head && pytest -q
+      # migrations run as the owner and provision the app role; tests run AS the app role so RLS is real
+      - run: cd apps/api && pip install -e ".[dev]" && ruff check .
+      - run: cd apps/api && JOBWATCH_APP_DB_PASSWORD=app alembic upgrade head
+      - run: cd apps/api && alembic downgrade base && JOBWATCH_APP_DB_PASSWORD=app alembic upgrade head   # full chain must be reversible
+      - run: cd apps/api && pytest -q
+        env: {DATABASE_URL: "postgresql+psycopg://jobwatch_app:app@localhost:5432/cronsentinel", SECRET_ENCRYPTION_KEY: ci-only-not-a-secret}
   web:
     runs-on: ubuntu-latest
     steps:

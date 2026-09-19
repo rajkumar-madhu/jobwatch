@@ -91,7 +91,7 @@ def create_rule(body: RuleIn, request: Request, p: Principal = Depends(require_r
     with tenant_session(p.org_id) as s:
         r = s.execute(text(
             "INSERT INTO alert_rules (org_id, name, condition, scope, params, severity, channel_ids, business_hours, repeat_interval_s, enabled) "
-            "VALUES (:o, :n, :c, :sc::jsonb, :pa::jsonb, :sev, :ch::uuid[], :bh::jsonb, :ri, :en) RETURNING id"),
+            "VALUES (:o, :n, :c, CAST(:sc AS jsonb), CAST(:pa AS jsonb), :sev, CAST(:ch AS uuid[]), CAST(:bh AS jsonb), :ri, :en) RETURNING id"),
             {"o": str(p.org_id), "n": body.name, "c": body.condition, "sc": __import__("json").dumps(body.scope), "pa": __import__("json").dumps(body.params),
              "sev": body.severity, "ch": [str(c) for c in body.channel_ids], "bh": __import__("json").dumps(body.business_hours) if body.business_hours else None,
              "ri": body.repeat_interval_s, "en": body.enabled}).first()
@@ -124,7 +124,7 @@ def list_maintenance(p: Principal = Depends(current_principal)):
 def create_maintenance(body: MaintenanceIn, request: Request, p: Principal = Depends(require_role("devops"))):
     if body.ends_at <= body.starts_at: raise HTTPException(400, "ends_at must be after starts_at")
     with tenant_session(p.org_id) as s:
-        r = s.execute(text("INSERT INTO maintenance_windows (org_id, scope, starts_at, ends_at, rrule) VALUES (:o, :sc::jsonb, :st, :en, :rr) RETURNING id"),
+        r = s.execute(text("INSERT INTO maintenance_windows (org_id, scope, starts_at, ends_at, rrule) VALUES (:o, CAST(:sc AS jsonb), :st, :en, :rr) RETURNING id"),
                       {"o": str(p.org_id), "sc": __import__("json").dumps(body.scope), "st": body.starts_at, "en": body.ends_at, "rr": body.rrule}).first()
         audit(s, p, "maintenance.create", "maintenance_window", str(r.id), ip=request.client.host)
         return {"id": r.id}

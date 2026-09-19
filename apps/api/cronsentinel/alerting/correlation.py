@@ -2,7 +2,7 @@
 Within a 5-minute window, a new failure joins an existing open incident if it shares a signal:
   same host · same cluster+namespace · dependency chain · same deploy_version · infra anomaly on the same server."""
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import text
 
@@ -33,7 +33,7 @@ def signals_for_job(s, org: str, job_id: str) -> dict:
 
 def find_related_incident(s, org: str, job_id: str, sig: dict):
     """Return (incident_id, reason) of an open incident within WINDOW sharing a signal, else (None, None)."""
-    since = datetime.now(timezone.utc) - WINDOW
+    since = datetime.now(UTC) - WINDOW
     cands = s.execute(text("SELECT id, affected_job_ids, correlation_signals, started_at FROM incidents WHERE org_id=:o AND status<>'resolved' AND started_at >= :since ORDER BY started_at DESC"),
                       {"o": org, "since": since - timedelta(minutes=25)}).all()  # incidents may be older but still receiving failures
     for c in cands:
@@ -49,11 +49,11 @@ def find_related_incident(s, org: str, job_id: str, sig: dict):
 
 
 def attach(s, org: str, incident_id, job_id: str, sig: dict, reason: str, prev: str, new: str):
-    s.execute(text("""UPDATE incidents SET affected_job_ids = (SELECT array_agg(DISTINCT x) FROM unnest(array_append(affected_job_ids, :j::uuid)) x),
-                      correlation_signals = correlation_signals || :sig::jsonb, title = CASE WHEN array_length(affected_job_ids,1) >= 1 THEN
+    s.execute(text("""UPDATE incidents SET affected_job_ids = (SELECT array_agg(DISTINCT x) FROM unnest(array_append(affected_job_ids, CAST(:j AS uuid))) x),
+                      correlation_signals = correlation_signals || CAST(:sig AS jsonb), title = CASE WHEN array_length(affected_job_ids,1) >= 1 THEN
                         (SELECT count(*)+1 FROM unnest(affected_job_ids))::text || ' related jobs failing' ELSE title END WHERE id=:i AND org_id=:o"""),
               {"j": job_id, "sig": json.dumps([{**sig, "job_id": job_id}]), "i": incident_id, "o": org})
-    s.execute(text("INSERT INTO incident_events (org_id, incident_id, kind, payload) VALUES (:o, :i, 'correlated', :p::jsonb)"),
+    s.execute(text("INSERT INTO incident_events (org_id, incident_id, kind, payload) VALUES (:o, :i, 'correlated', CAST(:p AS jsonb))"),
               {"o": org, "i": incident_id, "p": json.dumps({"job_id": job_id, "reason": reason, "prev": prev, "new": new})})
 
 

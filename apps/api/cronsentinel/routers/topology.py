@@ -22,7 +22,7 @@ def dependencies(p: Principal = Depends(current_principal)):
     with tenant_session(p.org_id) as s:
         edges = [dict(r._mapping) for r in s.execute(text("SELECT job_id, depends_on_job_id FROM job_dependencies")).all()]
         ids = {str(e["job_id"]) for e in edges} | {str(e["depends_on_job_id"]) for e in edges}
-        nodes = [dict(r._mapping) | {"status": str(r.status)} for r in s.execute(text("SELECT id, name, status, last_run_at FROM jobs WHERE id = ANY(:ids::uuid[])"), {"ids": list(ids)}).all()] if ids else []
+        nodes = [dict(r._mapping) | {"status": str(r.status)} for r in s.execute(text("SELECT id, name, status, last_run_at FROM jobs WHERE id = ANY(CAST(:ids AS uuid[]))"), {"ids": list(ids)}).all()] if ids else []
     return {"nodes": nodes, "edges": edges}
 
 

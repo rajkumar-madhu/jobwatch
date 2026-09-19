@@ -1,6 +1,9 @@
 """Celery notification tasks. One task per (channel, event). Per-channel rate limit + ledger."""
-import hashlib, hmac, json, smtplib
-from datetime import datetime, timezone
+import hashlib
+import hmac
+import json
+import smtplib
+from datetime import UTC, datetime
 from email.message import EmailMessage
 
 import httpx
@@ -77,7 +80,7 @@ def send_notification(self, org_id: str, channel_id: str, dedup_key: str, incide
         if not ch or not ch.enabled:
             return
         # per-channel rate limit (D10)
-        k = f"chrl:{channel_id}:{datetime.now(timezone.utc).strftime('%Y%m%d%H%M')}"
+        k = f"chrl:{channel_id}:{datetime.now(UTC).strftime('%Y%m%d%H%M')}"
         n = _r.incr(k); _r.expire(k, 120)
         if n > ch.rate_per_min:
             s.execute(text("INSERT INTO notification_ledger (org_id, incident_id, channel_id, dedup_key, status, error) VALUES (:o, :i, :c, :k, 'rate_limited', NULL)"),
@@ -94,7 +97,7 @@ def send_notification(self, org_id: str, channel_id: str, dedup_key: str, incide
                   {"o": org_id, "i": incident_id, "c": channel_id, "k": dedup_key, "st": status, "e": err})
         if incident_id:
             s.execute(text("UPDATE incidents SET last_notified_at=now() WHERE id=:i"), {"i": incident_id})
-            s.execute(text("INSERT INTO incident_events (org_id, incident_id, kind, payload) VALUES (:o, :i, 'notified', :p::jsonb)"),
+            s.execute(text("INSERT INTO incident_events (org_id, incident_id, kind, payload) VALUES (:o, :i, 'notified', CAST(:p AS jsonb))"),
                       {"o": org_id, "i": incident_id, "p": json.dumps({"channel_id": channel_id, "kind": ch.kind, "status": status})})
     if status == "failed":
         raise self.retry(exc=RuntimeError(err))

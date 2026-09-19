@@ -15,7 +15,9 @@ def tenant_session(org_id: UUID):
     """Session scoped to one tenant; RLS enforces org_id on every statement."""
     s: Session = SessionLocal()
     try:
-        s.execute(text("SET LOCAL app.org_id = :org"), {"org": str(org_id)})
+        # SET cannot take bind parameters (psycopg raises "syntax error at or near $1"); set_config can.
+        # is_local=true scopes it to the transaction, same as SET LOCAL.
+        s.execute(text("SELECT set_config('app.org_id', :org, true)"), {"org": str(org_id)})
         yield s
         s.commit()
     except Exception:

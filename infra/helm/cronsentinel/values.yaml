@@ -1,8 +1,11 @@
 image: {api: ghcr.io/cronsentinel/api:0.1.0, web: ghcr.io/cronsentinel/web:0.1.0}
 domain: cronsentinel.example.com
 ingestDomain: ingest.cronsentinel.example.com
+migration:                # used only by the pre-install/pre-upgrade migrate hook, which runs as the DB owner
+  databaseUrl: postgresql+psycopg://owner:pass@postgres:5432/cronsentinel
+  appDbPassword: pass     # must match the password in env.DATABASE_URL; migration 0007 sets it on jobwatch_app
 env:                      # rendered into a Secret; supply real values via --set-file or external-secrets
-  DATABASE_URL: postgresql+psycopg://user:pass@postgres:5432/cronsentinel
+  DATABASE_URL: postgresql+psycopg://jobwatch_app:pass@postgres:5432/cronsentinel   # app role (migration 0007); RLS applies
   REDIS_URL: redis://redis:6379/0
   NATS_URL: nats://cronsentinel-nats:4222
   KEYCLOAK_ISSUER: https://auth.example.com/realms/cronsentinel

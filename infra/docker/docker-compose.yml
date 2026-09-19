@@ -1,5 +1,7 @@
 x-api-env: &api-env
-  DATABASE_URL: postgresql+psycopg://cronsentinel:cronsentinel@postgres:5432/cronsentinel
+  # App/workers connect as the non-superuser role created by migration 0007 so RLS applies.
+  # The owner URL is only used by the `migrate` service below.
+  DATABASE_URL: postgresql+psycopg://jobwatch_app:jobwatch_app@postgres:5432/cronsentinel
   REDIS_URL: redis://redis:6379/0
   NATS_URL: nats://nats:4222
   KEYCLOAK_ISSUER: http://keycloak:8080/realms/cronsentinel
@@ -34,6 +36,15 @@ services:
     environment: {KEYCLOAK_ADMIN: admin, KEYCLOAK_ADMIN_PASSWORD: admin}
     volumes: ["../keycloak-realm.json:/opt/keycloak/data/import/realm.json:ro"]
     ports: ["8080:8080"]
+  migrate:
+    build: {context: ../.., dockerfile: infra/docker/Dockerfile.api}
+    command: alembic upgrade head
+    environment:
+      <<: *api-env
+      DATABASE_URL: postgresql+psycopg://cronsentinel:cronsentinel@postgres:5432/cronsentinel   # owner
+      JOBWATCH_APP_DB_PASSWORD: jobwatch_app   # dev only; set a real one outside compose
+    depends_on:
+      postgres: {condition: service_healthy}
   api:
     build: {context: ../.., dockerfile: infra/docker/Dockerfile.api}
     command: uvicorn cronsentinel.main:app --host 0.0.0.0 --port 8000

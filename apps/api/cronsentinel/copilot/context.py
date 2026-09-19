@@ -1,7 +1,7 @@
 """Builds the telemetry context the Copilot reasons over. Everything passes through redact() (D12).
 Returns a compact dict + a human-readable transcript for the prompt."""
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import text
 
@@ -12,7 +12,7 @@ def _rows(s, q, **p): return [dict(r._mapping) for r in s.execute(text(q), p).al
 
 
 def build(s, org: str, job_id: str | None = None, incident_id: str | None = None, question: str = "") -> dict:
-    ctx: dict = {"now": datetime.now(timezone.utc).isoformat()}
+    ctx: dict = {"now": datetime.now(UTC).isoformat()}
     job_ids: list[str] = []
     if incident_id:
         inc = s.execute(text("SELECT id, title, severity::text, status::text, started_at, affected_job_ids, correlation_signals FROM incidents WHERE id=:i AND org_id=:o"), {"i": incident_id, "o": org}).first()

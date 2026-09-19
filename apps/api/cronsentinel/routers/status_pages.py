@@ -30,12 +30,12 @@ def create_page(body: PageIn, request: Request, p: Principal = Depends(require_r
     if not body.slug.replace("-", "").isalnum(): raise HTTPException(400, "slug: letters, digits, dashes")
     with tenant_session(p.org_id) as s:
         try:
-            pid = s.execute(text("INSERT INTO status_pages (org_id, slug, title, visibility, job_ids) VALUES (:o, :s, :t, :v, :j::uuid[]) RETURNING id"),
+            pid = s.execute(text("INSERT INTO status_pages (org_id, slug, title, visibility, job_ids) VALUES (:o, :s, :t, :v, CAST(:j AS uuid[])) RETURNING id"),
                             {"o": str(p.org_id), "s": body.slug, "t": body.title, "v": body.visibility, "j": [str(j) for j in body.job_ids]}).scalar()
         except Exception as e:
             if "unique" in str(e).lower(): raise HTTPException(409, "slug taken")
             raise
-        s.execute(text("UPDATE jobs SET public_visibility='status_only' WHERE id = ANY(:j::uuid[]) AND public_visibility='none'"), {"j": [str(j) for j in body.job_ids]})
+        s.execute(text("UPDATE jobs SET public_visibility='status_only' WHERE id = ANY(CAST(:j AS uuid[])) AND public_visibility='none'"), {"j": [str(j) for j in body.job_ids]})
         audit(s, p, "status_page.create", "status_page", str(pid), ip=request.client.host)
     return {"id": pid, "url": f"/status/{body.slug}"}
 
@@ -56,9 +56,9 @@ def public_status(slug: str):
               (SELECT round(100.0*count(*) FILTER (WHERE status='success')/NULLIF(count(*) FILTER (WHERE status IN ('success','failed','timeout','missed')),0),2)
                  FROM executions e WHERE e.job_id=j.id AND e.scheduled_ts >= now() - interval '90 days') AS uptime_90d,
               (SELECT array_agg(status::text ORDER BY scheduled_ts DESC) FROM (SELECT status, scheduled_ts FROM executions WHERE job_id=j.id ORDER BY scheduled_ts DESC LIMIT 60) x) AS recent
-            FROM jobs j WHERE j.org_id=:o AND j.id = ANY(:ids::uuid[]) AND j.public_visibility<>'none' ORDER BY j.name"""),
+            FROM jobs j WHERE j.org_id=:o AND j.id = ANY(CAST(:ids AS uuid[])) AND j.public_visibility<>'none' ORDER BY j.name"""),
             {"o": pg.org_id, "ids": [str(i) for i in pg.job_ids]}).all()
-        inc = s.execute(text("SELECT title, severity::text, status::text, started_at, resolved_at FROM incidents WHERE org_id=:o AND affected_job_ids && :ids::uuid[] AND started_at >= now() - interval '30 days' ORDER BY started_at DESC LIMIT 20"),
+        inc = s.execute(text("SELECT title, severity::text, status::text, started_at, resolved_at FROM incidents WHERE org_id=:o AND affected_job_ids && CAST(:ids AS uuid[]) AND started_at >= now() - interval '30 days' ORDER BY started_at DESC LIMIT 20"),
                         {"o": pg.org_id, "ids": [str(i) for i in pg.job_ids]}).all()
         mw = s.execute(text("SELECT starts_at, ends_at FROM maintenance_windows WHERE org_id=:o AND ends_at >= now() ORDER BY starts_at LIMIT 5"), {"o": pg.org_id}).all()
     overall = "operational"

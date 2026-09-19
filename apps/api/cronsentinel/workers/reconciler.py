@@ -27,7 +27,7 @@ log = structlog.get_logger()
 OFFLINE_MULTIPLIER = 3  # agent silent for 3× its own reported heartbeat interval ⇒ its jobs are UNKNOWN, not failing
 
 
-def _settle_maintenance(s) -> int:
+def _settle_maintenance(s) -> list[tuple]:
     """Slots that came due inside a maintenance window, or while the job was paused, are skipped."""
     return s.execute(text("""
         UPDATE expected_runs er SET state='skipped', settled_at=now()
@@ -37,9 +37,10 @@ def _settle_maintenance(s) -> int:
                 SELECT 1 FROM maintenance_windows m WHERE m.org_id=er.org_id
                   AND m.starts_at <= er.scheduled_for AND m.ends_at >= er.scheduled_for
                   AND (m.scope = '{}'::jsonb
-                       OR (m.scope->'job_ids') ? er.job_id::text
+                       OR (m.scope->'job_ids') ? CAST(er.job_id AS text)
                        OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(m.scope->'tags','[]')) t WHERE t = ANY(j.tags))
-                       OR (m.scope->'environment_ids') ? j.environment_id::text)))""")).rowcount
+                       OR (m.scope->'environment_ids') ? CAST(j.environment_id AS text))))
+        RETURNING er.job_id, er.org_id""")).all()
 
 
 def _mark_late(s) -> list[tuple]:
@@ -75,10 +76,10 @@ def _mark_timeouts(s) -> list[tuple]:
 
 def recompute_state(s, job_id, org_id) -> dict | None:
     """Recompute the four-state for one job from its slots. Returns a change event, or None."""
-    j = s.execute(text("""SELECT j.id, j.paused, j.schedule_expr, j.last_run_at, j.job_state::text, j.status::text, j.state_since,
+    j = s.execute(text("""SELECT j.id, j.paused, j.schedule_expr, j.last_run_at, j.job_state::text, j.status::text, j.state_since, j.unknown_reason,
             a.last_seen_at AS agent_seen, a.heartbeat_interval_s AS agent_hb
         FROM jobs j LEFT JOIN servers sv ON sv.id=j.server_id LEFT JOIN agents a ON a.id=sv.agent_id
-        WHERE j.id=:id FOR UPDATE"""), {"id": job_id}).first()
+        WHERE j.id=:id FOR UPDATE OF j"""), {"id": job_id}).first()
     if not j:
         return None
     open_late = s.execute(text("SELECT EXISTS (SELECT 1 FROM expected_runs WHERE job_id=:id AND state='late')"), {"id": job_id}).scalar()
@@ -95,11 +96,11 @@ def recompute_state(s, job_id, org_id) -> dict | None:
                            recovered=last == "succeeded" and prev_ok in ("failed", "missed"))
     fails = s.execute(text("""SELECT count(*) FROM expected_runs WHERE job_id=:id AND state IN ('failed','missed')
         AND scheduled_for > COALESCE((SELECT max(scheduled_for) FROM expected_runs WHERE job_id=:id AND state='succeeded'), '-infinity'::timestamptz)"""), {"id": job_id}).scalar()
-    if state.value == j.job_state and legacy == j.status:
+    if state.value == j.job_state and legacy == j.status and (reason or None) == j.unknown_reason:
         s.execute(text("UPDATE jobs SET consecutive_failures=:c WHERE id=:id"), {"c": fails, "id": job_id})
         return None
-    s.execute(text("""UPDATE jobs SET job_state=:st, unknown_reason=:r, status=:legacy, consecutive_failures=:c,
-        state_since=CASE WHEN job_state=:st THEN state_since ELSE now() END, updated_at=now() WHERE id=:id"""),
+    s.execute(text("""UPDATE jobs SET job_state=CAST(:st AS job_state), unknown_reason=:r, status=CAST(:legacy AS job_status), consecutive_failures=:c,
+        state_since=CASE WHEN job_state=CAST(:st AS job_state) THEN state_since ELSE now() END, updated_at=now() WHERE id=:id"""),
         {"st": state.value, "r": reason, "legacy": legacy, "c": fails, "id": job_id})
     return {"job_id": str(job_id), "org_id": str(org_id), "prev_status": j.status, "new_status": legacy,
             "prev_state": j.job_state, "new_state": state.value, "unknown_reason": reason, "consecutive_failures": fails}
@@ -108,15 +109,19 @@ def recompute_state(s, job_id, org_id) -> dict | None:
 def tick(s) -> list[dict]:
     touched: set[tuple] = set()
     skipped = _settle_maintenance(s)
+    for r in skipped: touched.add((r.job_id, r.org_id))
     for r in _mark_late(s): touched.add((r.job_id, r.org_id))
     for r in _mark_missed(s): touched.add((r.job_id, r.org_id))
     for r in _mark_timeouts(s): touched.add((r.job_id, r.org_id))
     # jobs whose agent just went quiet, or came back, also need a state pass
     for r in s.execute(text("""SELECT j.id, j.org_id FROM jobs j JOIN servers sv ON sv.id=j.server_id JOIN agents a ON a.id=sv.agent_id
-        WHERE (a.last_seen_at < now() - (a.heartbeat_interval_s * 3 || ' seconds')::interval) <> (j.job_state='unknown' AND j.unknown_reason='agent_offline')""")).all():
+        WHERE (a.last_seen_at < now() - make_interval(secs => a.heartbeat_interval_s * 3)) <> (j.job_state='unknown' AND j.unknown_reason='agent_offline')""")).all():
+        touched.add((r.id, r.org_id))
+    # pause/resume flips need a state pass even when no slot changed
+    for r in s.execute(text("SELECT id, org_id FROM jobs WHERE paused <> (job_state='unknown' AND unknown_reason='paused')")).all():
         touched.add((r.id, r.org_id))
     if skipped:
-        log.info("slots skipped (maintenance/paused)", slots=skipped)
+        log.info("slots skipped (maintenance/paused)", slots=len(skipped))
     out = []
     for job_id, org_id in touched:
         ev = recompute_state(s, job_id, org_id)

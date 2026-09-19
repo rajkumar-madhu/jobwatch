@@ -1,9 +1,10 @@
 """Kubernetes agent ingest + cluster read API."""
-import json, secrets
-from datetime import datetime, timezone
+import json
+import secrets
+from datetime import UTC, datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 from sqlalchemy import text
 
@@ -56,7 +57,7 @@ def discover_cronjobs(body: dict, a: dict = Depends(agent_principal)):
             s.execute(text("""
                 INSERT INTO k8s_cronjobs (org_id, cluster_id, job_id, namespace, name, uid, schedule, suspend, concurrency_policy, successful_history_limit, failed_history_limit,
                   active_deadline_s, starting_deadline_s, last_schedule_at, last_success_at, image, command, spec, updated_at)
-                VALUES (:o, :cl, :j, :ns, :n, :uid, :sch, :sus, :cp, :shl, :fhl, :ad, :sd, :ls, :lsu, :img, :cmd, :spec::jsonb, now())
+                VALUES (:o, :cl, :j, :ns, :n, :uid, :sch, :sus, :cp, :shl, :fhl, :ad, :sd, :ls, :lsu, :img, :cmd, CAST(:spec AS jsonb), now())
                 ON CONFLICT (cluster_id, uid) DO UPDATE SET schedule=EXCLUDED.schedule, suspend=EXCLUDED.suspend, concurrency_policy=EXCLUDED.concurrency_policy,
                   successful_history_limit=EXCLUDED.successful_history_limit, failed_history_limit=EXCLUDED.failed_history_limit, active_deadline_s=EXCLUDED.active_deadline_s,
                   starting_deadline_s=EXCLUDED.starting_deadline_s, last_schedule_at=EXCLUDED.last_schedule_at, last_success_at=EXCLUDED.last_success_at, image=EXCLUDED.image, command=EXCLUDED.command, updated_at=now()"""),
@@ -70,7 +71,7 @@ def discover_cronjobs(body: dict, a: dict = Depends(agent_principal)):
 @agent.post("/events")
 async def k8s_events(body: dict, request: Request, a: dict = Depends(agent_principal)):
     org, aid = a["org_id"], a["agent_id"]
-    now = datetime.now(timezone.utc); acc = 0
+    now = datetime.now(UTC); acc = 0
     js = request.app.state.js
     with system_session() as s:
         cl = _cluster(s, org, aid)
@@ -85,7 +86,7 @@ async def k8s_events(body: dict, request: Request, a: dict = Depends(agent_princ
             if kind == "progress":  # pod-level failure reason enrichment
                 s.execute(text("UPDATE executions SET failure_reason=:r, pod=COALESCE(:pod, pod), node=COALESCE(:node, node) WHERE id=:eid AND org_id=:o"),
                           {"r": e.get("reason"), "pod": e.get("pod"), "node": e.get("node"), "eid": e.get("execution_id"), "o": org})
-                s.execute(text("INSERT INTO execution_events (org_id, execution_id, agent_id, sequence, kind, agent_ts, payload) VALUES (:o, :eid, :a, :seq, 'progress', :ts, :p::jsonb) ON CONFLICT DO NOTHING"),
+                s.execute(text("INSERT INTO execution_events (org_id, execution_id, agent_id, sequence, kind, agent_ts, payload) VALUES (:o, :eid, :a, :seq, 'progress', :ts, CAST(:p AS jsonb)) ON CONFLICT DO NOTHING"),
                           {"o": org, "eid": e.get("execution_id"), "a": aid, "seq": e.get("sequence", 5), "ts": e.get("agent_ts"), "p": json.dumps({"reason": e.get("reason"), "pod": e.get("pod"), "node": e.get("node")})})
                 acc += 1; continue
             ev = {"org_id": org, "job_id": str(job_id), "agent_id": aid, "kind": kind, "execution_id": e.get("execution_id"), "sequence": e.get("sequence", 0), "agent_ts": e.get("agent_ts"),

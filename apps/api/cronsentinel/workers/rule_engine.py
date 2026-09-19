@@ -1,5 +1,6 @@
 """NATS consumer: jobstatus.* → alerting.engine.handle_status_change."""
-import asyncio, json
+import asyncio
+import json
 
 import structlog
 from nats.js.api import AckPolicy, ConsumerConfig
@@ -19,7 +20,7 @@ async def main():
     while True:
         try:
             msgs = await sub.fetch(20, timeout=5)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             continue
         for m in msgs:
             try:

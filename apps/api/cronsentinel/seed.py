@@ -1,7 +1,9 @@
 """Demo data generator. `python -m cronsentinel.seed --org <org_id>` — idempotent-ish (skips existing job names).
 Produces 7 days of executions across healthy/running/failed/late/missed/recovered states."""
-import argparse, random, secrets
-from datetime import datetime, timedelta, timezone
+import argparse
+import random
+import secrets
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import text
 
@@ -23,7 +25,7 @@ STDERR = {"failing": "psycopg2.OperationalError: connection to server at \"prod-
 
 
 def seed(org: str):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     with system_session() as s:
         ws = s.execute(text("SELECT id FROM workspaces WHERE org_id=:o ORDER BY created_at LIMIT 1"), {"o": org}).scalar()
         if not ws:
@@ -65,7 +67,7 @@ def seed(org: str):
                                "VALUES (:id, :o, :j, :st, :sch, :a, :b, :b, :skew, :d, :c, :h, 1)"),
                           {"id": eid, "o": org, "j": jid, "st": status, "sch": st, "a": start, "b": end, "skew": random.randint(-40, 40), "d": dur, "c": code, "h": host})
                 for seq, kind, ts_ in ((0, "start", start), (1, "success" if status == "success" else "fail", end)):
-                    s.execute(text("INSERT INTO execution_events (org_id, execution_id, sequence, kind, agent_ts, server_ts, payload) VALUES (:o, :e, :q, :k, :t, :t, :p::jsonb)"),
+                    s.execute(text("INSERT INTO execution_events (org_id, execution_id, sequence, kind, agent_ts, server_ts, payload) VALUES (:o, :e, :q, :k, :t, :t, CAST(:p AS jsonb))"),
                               {"o": org, "e": eid, "q": seq, "k": kind, "t": ts_, "p": '{"command":"/opt/jobs/%s.sh"}' % name if seq == 0 else "{}"})
                 if err:
                     s.execute(text("INSERT INTO execution_logs (org_id, execution_id, stream, chunk_idx, content) VALUES (:o, :e, 'stderr', 0, :c)"), {"o": org, "e": eid, "c": err})
@@ -82,7 +84,7 @@ def seed(org: str):
                        "sc": {"healthy": 98, "slowing": 91, "flaky": 74, "failing": 61, "missed": 83, "running": 97}[profile], "id": jid})
             # host metrics: disk I/O climb on backup host for the "slowing" story
             if profile == "slowing":
-                for m in range(0, 7 * 24 * 2):
+                for m in range(7 * 24 * 2):
                     ts_ = now - timedelta(minutes=30 * m); frac = 1 - m / (7 * 24 * 2)
                     s.execute(text("INSERT INTO host_metrics (org_id, server_id, ts, cpu_pct, mem_pct, load1, disk_pct, inode_pct, io_wait_ms) VALUES (:o, :s, :t, :c, :mem, :l, :d, :i, :w) ON CONFLICT DO NOTHING"),
                               {"o": org, "s": srv_ids[host], "t": ts_, "c": random.uniform(10, 30), "mem": random.uniform(40, 55), "l": random.uniform(0.5, 2), "d": 62 + 25 * frac, "i": 30, "w": 12 + 176 * frac})

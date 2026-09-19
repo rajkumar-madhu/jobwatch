@@ -1,9 +1,9 @@
 """Server-side schedule evaluation (D4)."""
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
-from croniter import croniter
 from cron_descriptor import ExpressionDescriptor, Options
+from croniter import croniter
 
 
 def validate(expr: str) -> bool:
@@ -20,9 +20,9 @@ def human(expr: str) -> str:
 
 def next_runs(expr: str, tz: str = "UTC", n: int = 5, after: datetime | None = None) -> list[datetime]:
     zone = ZoneInfo(tz)
-    base = (after or datetime.now(timezone.utc)).astimezone(zone)
+    base = (after or datetime.now(UTC)).astimezone(zone)
     it = croniter(expr, base)
-    return [it.get_next(datetime).astimezone(timezone.utc) for _ in range(n)]
+    return [it.get_next(datetime).astimezone(UTC) for _ in range(n)]
 
 
 def next_run(expr: str, tz: str = "UTC", after: datetime | None = None) -> datetime:
@@ -31,5 +31,5 @@ def next_run(expr: str, tz: str = "UTC", after: datetime | None = None) -> datet
 
 def prev_run(expr: str, tz: str = "UTC", before: datetime | None = None) -> datetime:
     zone = ZoneInfo(tz)
-    base = (before or datetime.now(timezone.utc)).astimezone(zone)
-    return croniter(expr, base).get_prev(datetime).astimezone(timezone.utc)
+    base = (before or datetime.now(UTC)).astimezone(zone)
+    return croniter(expr, base).get_prev(datetime).astimezone(UTC)

@@ -1,6 +1,8 @@
 """Envelope-ish symmetric encryption for channel/integration configs. Key from SECRET_ENCRYPTION_KEY.
 TODO Phase 6: per-org data keys wrapped by KMS."""
-import base64, hashlib, json
+import base64
+import hashlib
+import json
 
 from cryptography.fernet import Fernet
 

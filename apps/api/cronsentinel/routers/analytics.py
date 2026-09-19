@@ -1,5 +1,5 @@
 """Analytics + reports (spec §16). Extends /api/v1/analytics (overview lives in overview.py)."""
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import text
@@ -56,7 +56,7 @@ def mttr(p: Principal = Depends(current_principal), days: int = Query(30, le=365
 @router.get("/report")
 def report(p: Principal = Depends(current_principal), period: str = "weekly"):
     days = {"daily": 1, "weekly": 7, "monthly": 30}.get(period, 7)
-    since = datetime.now(timezone.utc) - timedelta(days=days)
+    since = datetime.now(UTC) - timedelta(days=days)
     with tenant_session(p.org_id) as s:
         tot = s.execute(text("""SELECT count(*) AS runs, count(*) FILTER (WHERE status='success') AS ok, count(*) FILTER (WHERE status IN ('failed','timeout')) AS failed, count(*) FILTER (WHERE status='missed') AS missed,
             percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms) AS p95_ms FROM executions WHERE scheduled_ts >= :s AND status<>'running'"""), {"s": since}).first()

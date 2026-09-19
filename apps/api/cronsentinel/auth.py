@@ -10,9 +10,9 @@ from fastapi import Depends, Header, HTTPException, Request
 from jose import jwt
 from sqlalchemy import text
 
-from .config import settings
-from .db import SessionLocal, system_session
 from . import ratelimit
+from .config import settings
+from .db import system_session
 
 ROLE_ORDER = ["viewer", "developer", "sre", "devops", "admin", "owner"]
 _ph = PasswordHasher()
@@ -120,6 +120,6 @@ def require_role(role: str):
 def audit(s, p: Principal, action: str, target_type: str, target_id: str, payload: dict | None = None, ip: str | None = None):
     s.execute(text(
         "INSERT INTO audit_logs (org_id, actor_id, actor_type, action, target_type, target_id, ip, payload) "
-        "VALUES (:org, :actor, :atype, :action, :tt, :tid, :ip, :payload::jsonb)"),
+        "VALUES (:org, :actor, :atype, :action, :tt, :tid, :ip, CAST(:payload AS jsonb))"),
         {"org": str(p.org_id), "actor": str(p.user_id or p.api_key_id), "atype": "user" if p.user_id else "api_key",
          "action": action, "tt": target_type, "tid": target_id, "ip": ip, "payload": __import__("json").dumps(payload or {})})

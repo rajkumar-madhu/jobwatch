@@ -148,3 +148,25 @@ Tests: `tests/test_outbound_schema.py` (9 contract tests). 49 passed / 1 skipped
 - Migration 0006 not run against live Postgres (no DB in sandbox).
 - `deliver_signal` Celery task exercised only through import + `sign()`; end-to-end delivery needs Redis + a receiver.
 - Go changes (heartbeat interval field) not compiled — R1 still pending on a real host.
+
+## R5 — integration harness (real Postgres)
+
+`tests/integration/` (18 tests, see its README) run against Postgres 16 as `jobwatch_app`. CI now runs
+`alembic upgrade head` → `downgrade base` → `upgrade head` as the owner, then the whole suite as the app role.
+
+### Four production-breaking bugs the harness found — none of the DB paths had ever run
+1. `SET LOCAL app.org_id = :org` — SET cannot take bind params → every tenant request 500. Now `set_config(..., true)`.
+2. App connected as the DB superuser (compose `POSTGRES_USER`) → superusers bypass RLS, tenant isolation was off.
+   Migration 0007 creates `jobwatch_app` (NOSUPERUSER NOBYPASSRLS); compose has a `migrate` service, Helm's
+   migrate hook uses `migration.databaseUrl` + `migration.appDbPassword`; API/workers use the app URL.
+3. `current_setting('app.org_id', true)::uuid` — on a pooled connection the GUC reads `''` after its transaction,
+   and `''::uuid` raises. Migration 0008 recreates all policies via `app_org_id()` (NULLIF) / `app_bypass()`.
+4. `:param::type` in SQLAlchemy `text()` is not parsed as a bind + cast → syntax error at the very first ingest
+   statement (28 sites incl. processor, alerting, incidents, audit, status pages). All now `CAST(:param AS type)`.
+
+Also: `FOR UPDATE` on an outer join, enum/text ambiguous params, reconciler not re-evaluating paused/skipped jobs.
+
+### Still not verified
+- Go agents (R1). K8s agent heartbeat_interval_s.
+- NATS consumers end-to-end (harness calls `tick()` directly). Celery real broker (task run with `.apply()`).
+- Keycloak flow, Stripe webhook against a live account.

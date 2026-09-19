@@ -4,11 +4,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import text
 
+from .. import ratelimit
 from ..auth import Principal, current_principal
+from ..config import settings
 from ..copilot import context, llm
 from ..db import tenant_session
-from .. import ratelimit
-from ..config import settings
 
 router = APIRouter(prefix="/api/v1/copilot", tags=["copilot"])
 
@@ -35,7 +35,7 @@ def ask(body: AskIn, p: Principal = Depends(current_principal)):
             answer, model, ms = llm.ask(body.question, ctx)
         except Exception as e:
             raise HTTPException(502, f"LLM call failed: {str(e)[:200]}")
-        sid = s.execute(text("INSERT INTO copilot_sessions (org_id, user_id, incident_id, job_id, question, answer, context_summary, model, latency_ms) VALUES (:o, :u, :i, :j, :q, :a::jsonb, :c::jsonb, :m, :ms) RETURNING id"),
+        sid = s.execute(text("INSERT INTO copilot_sessions (org_id, user_id, incident_id, job_id, question, answer, context_summary, model, latency_ms) VALUES (:o, :u, :i, :j, :q, CAST(:a AS jsonb), CAST(:c AS jsonb), :m, :ms) RETURNING id"),
                         {"o": str(p.org_id), "u": str(p.user_id) if p.user_id else None, "i": body.incident_id, "j": body.job_id, "q": body.question, "a": json.dumps(answer), "c": json.dumps(context.summarize(ctx)), "m": model, "ms": ms}).scalar()
         if body.incident_id and answer.get("root_cause"):
             s.execute(text("UPDATE incidents SET root_cause=COALESCE(root_cause, :rc) WHERE id=:i"), {"rc": f"[copilot, {answer['confidence']:.0%}] {answer['root_cause']}", "i": body.incident_id})

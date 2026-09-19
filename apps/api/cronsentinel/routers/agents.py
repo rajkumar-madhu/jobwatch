@@ -1,6 +1,7 @@
 """Agent enrollment/management (admin API) + agent-facing ingest endpoints (X-Agent-Key)."""
-import json, secrets
-from datetime import datetime, timezone
+import json
+import secrets
+from datetime import UTC, datetime
 from uuid import UUID
 
 import redis
@@ -9,7 +10,14 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from .. import ratelimit, schedule
-from ..auth import Principal, audit, current_principal, hash_secret, require_role, verify_secret
+from ..auth import (
+    Principal,
+    audit,
+    current_principal,
+    hash_secret,
+    require_role,
+    verify_secret,
+)
 from ..config import settings
 from ..db import system_session, tenant_session
 
@@ -173,7 +181,7 @@ class EventsIn(BaseModel):
 async def events(body: EventsIn, request: Request, a: dict = Depends(agent_principal)):
     """Batch of wrapper/passive events. Resolves job by token or fingerprint, publishes to NATS."""
     org, aid = a["org_id"], a["agent_id"]
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     accepted = dropped = 0
     js = request.app.state.js
     with system_session() as s:
@@ -211,7 +219,7 @@ def metrics(body: dict, a: dict = Depends(agent_principal)):
         if not srv: raise HTTPException(409, "no server bound to agent")
         s.execute(text("INSERT INTO host_metrics (org_id, server_id, ts, cpu_pct, mem_pct, load1, disk_pct, inode_pct, io_wait_ms) "
                        "VALUES (:o, :s, :ts, :cpu, :mem, :l1, :disk, :ino, :iow) ON CONFLICT DO NOTHING"),
-                  {"o": a["org_id"], "s": srv.id, "ts": body.get("ts") or datetime.now(timezone.utc), "cpu": body.get("cpu_pct"), "mem": body.get("mem_pct"),
+                  {"o": a["org_id"], "s": srv.id, "ts": body.get("ts") or datetime.now(UTC), "cpu": body.get("cpu_pct"), "mem": body.get("mem_pct"),
                    "l1": body.get("load1"), "disk": body.get("disk_pct"), "ino": body.get("inode_pct"), "iow": body.get("io_wait_pct")})
     return {"ok": True}
 
@@ -221,7 +229,7 @@ def agent_heartbeat(body: dict, a: dict = Depends(agent_principal)):
     skew = 0
     if body.get("agent_ts"):
         try:
-            skew = int((datetime.now(timezone.utc) - datetime.fromisoformat(body["agent_ts"].replace("Z", "+00:00"))).total_seconds() * 1000)
+            skew = int((datetime.now(UTC) - datetime.fromisoformat(body["agent_ts"].replace("Z", "+00:00"))).total_seconds() * 1000)
         except Exception:
             pass
     with system_session() as s:
@@ -231,4 +239,4 @@ def agent_heartbeat(body: dict, a: dict = Depends(agent_principal)):
         s.execute(text("UPDATE agents SET last_seen_at=now(), version=COALESCE(:v, version), skew_ms=:sk, status='active', "
                        "heartbeat_interval_s=COALESCE(:hb, heartbeat_interval_s) WHERE id=:a"),
                   {"v": body.get("version"), "sk": skew, "hb": hb, "a": a["agent_id"]})
-    return {"ok": True, "skew_ms": skew, "server_ts": datetime.now(timezone.utc).isoformat()}
+    return {"ok": True, "skew_ms": skew, "server_ts": datetime.now(UTC).isoformat()}

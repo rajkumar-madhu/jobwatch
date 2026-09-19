@@ -1,6 +1,6 @@
 """Rule engine: jobstatus event → incidents + notifications. I/O layer around rules.py."""
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import redis
 import structlog
@@ -8,8 +8,8 @@ from sqlalchemy import text
 
 from ..config import settings
 from ..db import system_session
-from . import rules as R
 from . import correlation as C
+from . import rules as R
 from .tasks import send_notification
 
 log = structlog.get_logger()
@@ -47,7 +47,7 @@ def _in_maintenance(s, org, job: R.JobCtx, now) -> bool:
 def _record_change(job_id: str, now: datetime) -> list[datetime]:
     k = f"flap:{job_id}"
     _r.zadd(k, {now.isoformat(): now.timestamp()}); _r.zremrangebyscore(k, 0, now.timestamp() - 3600); _r.expire(k, 3600)
-    return [datetime.fromtimestamp(sc, tz=timezone.utc) for _, sc in _r.zrange(k, 0, -1, withscores=True)]
+    return [datetime.fromtimestamp(sc, tz=UTC) for _, sc in _r.zrange(k, 0, -1, withscores=True)]
 
 
 def handle_status_change(ev: dict):
@@ -58,7 +58,7 @@ def handle_status_change(ev: dict):
     if supp:
         log.info("suppressed: unknown visibility", job=job_id, reason=supp)
         return
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     with system_session() as s:
         job = _job_ctx(s, org, job_id)
         if not job:
@@ -105,14 +105,14 @@ def handle_status_change(ev: dict):
                         continue
                 if inc:
                     incident_id = str(inc.id)
-                    s.execute(text("INSERT INTO incident_events (org_id, incident_id, kind, payload) VALUES (:o, :i, 'status_change', :p::jsonb)"),
+                    s.execute(text("INSERT INTO incident_events (org_id, incident_id, kind, payload) VALUES (:o, :i, 'status_change', CAST(:p AS jsonb))"),
                               {"o": org, "i": incident_id, "p": json.dumps({"prev": prev, "new": new})})
                 else:
                     title = f"{job.name} is {new}" if cond != "flapping" else f"{job.name} is flapping"
                     incident_id = str(s.execute(text(
-                        "INSERT INTO incidents (org_id, severity, title, correlation_key, affected_job_ids, rule_id, correlation_signals) VALUES (:o, :sev, :t, :ck, ARRAY[:j]::uuid[], :r, :sig::jsonb) RETURNING id"),
+                        "INSERT INTO incidents (org_id, severity, title, correlation_key, affected_job_ids, rule_id, correlation_signals) VALUES (:o, :sev, :t, :ck, ARRAY[:j]::uuid[], :r, CAST(:sig AS jsonb)) RETURNING id"),
                         {"o": org, "sev": rule.severity, "t": title, "ck": f"job:{job_id}", "j": job_id, "r": rule.id, "sig": json.dumps([{**sig, "job_id": job_id}])}).scalar())
-                    s.execute(text("INSERT INTO incident_events (org_id, incident_id, kind, payload) VALUES (:o, :i, 'opened', :p::jsonb)"),
+                    s.execute(text("INSERT INTO incident_events (org_id, incident_id, kind, payload) VALUES (:o, :i, 'opened', CAST(:p AS jsonb))"),
                               {"o": org, "i": incident_id, "p": json.dumps({"prev": prev, "new": new, "rule": rule.id})})
 
             payload = {"job_id": job.id, "job_name": job.name, "prev_status": prev, "new_status": new, "condition": cond,

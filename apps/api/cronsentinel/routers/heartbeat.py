@@ -1,6 +1,6 @@
 """Ingest tier. Token → job (Redis cached) → NATS publish. No auth header needed: token IS the auth."""
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import redis
 from fastapi import APIRouter, HTTPException, Request
@@ -34,7 +34,7 @@ async def _emit(request: Request, token: str, body: HeartbeatBody):
     ev = {
         "org_id": org, "job_id": job, "kind": body.status, "execution_id": body.execution_id,
         "sequence": body.sequence, "agent_ts": body.agent_ts.isoformat() if body.agent_ts else None,
-        "server_ts": datetime.now(timezone.utc).isoformat(), "duration_ms": body.duration_ms,
+        "server_ts": datetime.now(UTC).isoformat(), "duration_ms": body.duration_ms,
         "exit_code": body.exit_code, "host": body.host or request.client.host,
         "stdout_tail": body.stdout_tail, "stderr_tail": body.stderr_tail, "meta": body.meta,
     }

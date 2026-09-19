@@ -20,7 +20,7 @@ POLL_S = 15
 def _destinations(s, org_id: str, event_type: str, workspace_id: str | None) -> list[str]:
     rows = s.execute(text("""SELECT id FROM signal_destinations WHERE org_id=:o AND enabled
         AND (event_types = '{}' OR :et = ANY(event_types))
-        AND (workspace_ids = '{}' OR :ws::uuid = ANY(workspace_ids))"""),
+        AND (workspace_ids = '{}' OR CAST(:ws AS uuid) = ANY(workspace_ids))"""),
         {"o": org_id, "et": event_type, "ws": workspace_id}).all()
     return [str(r.id) for r in rows]
 

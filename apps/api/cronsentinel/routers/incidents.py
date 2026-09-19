@@ -64,7 +64,7 @@ def resolve(incident_id: UUID, body: ResolveIn, request: Request, p: Principal =
         n = s.execute(text("UPDATE incidents SET status='resolved', resolved_at=now(), resolution=:r, root_cause=COALESCE(:rc, root_cause) WHERE id=:id AND status<>'resolved'"),
                       {"id": str(incident_id), "r": body.resolution, "rc": body.root_cause}).rowcount
         if not n: raise HTTPException(409, "already resolved")
-        s.execute(text("INSERT INTO incident_events (org_id, incident_id, kind, actor_id, payload) VALUES (:o, :i, 'resolved', :a, :p::jsonb)"),
+        s.execute(text("INSERT INTO incident_events (org_id, incident_id, kind, actor_id, payload) VALUES (:o, :i, 'resolved', :a, CAST(:p AS jsonb))"),
                   {"o": str(p.org_id), "i": str(incident_id), "a": str(p.user_id) if p.user_id else None, "p": __import__("json").dumps(body.model_dump())})
         audit(s, p, "incident.resolve", "incident", str(incident_id), ip=request.client.host)
     return {"ok": True}
@@ -73,6 +73,6 @@ def resolve(incident_id: UUID, body: ResolveIn, request: Request, p: Principal =
 @router.post("/{incident_id}/notes")
 def add_note(incident_id: UUID, body: NoteIn, p: Principal = Depends(require_role("developer"))):
     with tenant_session(p.org_id) as s:
-        s.execute(text("INSERT INTO incident_events (org_id, incident_id, kind, actor_id, payload) VALUES (:o, :i, 'note', :a, :p::jsonb)"),
+        s.execute(text("INSERT INTO incident_events (org_id, incident_id, kind, actor_id, payload) VALUES (:o, :i, 'note', :a, CAST(:p AS jsonb))"),
                   {"o": str(p.org_id), "i": str(incident_id), "a": str(p.user_id) if p.user_id else None, "p": __import__("json").dumps({"text": body.text})})
     return {"ok": True}

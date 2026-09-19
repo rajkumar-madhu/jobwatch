@@ -1,10 +1,10 @@
 """Reliability score (design §4.3) + usage metering + partition/retention housekeeping. Runs hourly."""
-import asyncio, time
+import asyncio
+import time
 
 import structlog
 from sqlalchemy import text
 
-from ..config import settings
 from ..db import system_session
 
 log = structlog.get_logger()

@@ -21,7 +21,7 @@ async def main():
     while True:
         try:
             msgs = await sub.fetch(50, timeout=5)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             continue
         for m in msgs:
             try:

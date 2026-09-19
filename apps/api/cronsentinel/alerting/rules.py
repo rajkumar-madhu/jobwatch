@@ -1,6 +1,6 @@
 """Pure rule evaluation logic — no I/O. Tested in tests/test_rules.py."""
 from dataclasses import dataclass, field
-from datetime import datetime, time, timezone
+from datetime import datetime, time
 from zoneinfo import ZoneInfo
 
 BAD = {"failed", "timeout", "missed"}

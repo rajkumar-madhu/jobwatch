@@ -25,8 +25,9 @@ def attach_slot(s, org, job_id, started_at, exec_id: str, status: str) -> int | 
     if not row:
         return None
     new = {"running": "running", "success": "succeeded", "failed": "failed", "timeout": "failed"}.get(status, "running")
-    s.execute(text("""UPDATE expected_runs SET state=:st, execution_id=:e, matched_at=now(),
-        settled_at = CASE WHEN :st IN ('succeeded','failed') THEN now() ELSE settled_at END WHERE id=:id"""),
+    # :st is used once as an enum and once as text → psycopg cannot infer one type; cast explicitly
+    s.execute(text("""UPDATE expected_runs SET state=CAST(:st AS expected_run_state), execution_id=:e, matched_at=now(),
+        settled_at = CASE WHEN CAST(:st AS text) IN ('succeeded','failed') THEN now() ELSE settled_at END WHERE id=:id"""),
         {"st": new, "e": exec_id, "id": row.id})
     s.execute(text("UPDATE executions SET expected_run_id=:er WHERE id=:e AND org_id=:o"), {"er": row.id, "e": exec_id, "o": org})
     return row.id
@@ -46,7 +47,7 @@ def process(s, ev: dict) -> dict | None:
 
     dup = s.execute(text(
         "INSERT INTO execution_events (org_id, execution_id, agent_id, sequence, kind, agent_ts, server_ts, payload) "
-        "VALUES (:org, :eid, :agent, :seq, :kind, :ats, :sts, :payload::jsonb) ON CONFLICT DO NOTHING RETURNING 1"),
+        "VALUES (:org, :eid, :agent, :seq, :kind, :ats, :sts, CAST(:payload AS jsonb)) ON CONFLICT DO NOTHING RETURNING 1"),
         {"org": org, "eid": exec_id, "agent": ev.get("agent_id"), "seq": ev.get("sequence", 0), "kind": ev["kind"],
          "ats": agent_ts, "sts": server_ts, "payload": __import__("json").dumps({k: v for k, v in ev.get("meta", {}).items()})}).first()
     if not dup:
@@ -61,7 +62,7 @@ def process(s, ev: dict) -> dict | None:
     if ev["kind"] == "start":
         s.execute(text(
             "INSERT INTO executions (id, org_id, job_id, agent_id, status, scheduled_ts, agent_ts_start, server_received_ts, skew_ms, host, sequence_max, meta) "
-            "VALUES (:id, :org, :job, :agent, 'running', :sched, :ats, :sts, :skew, :host, :seq, :meta::jsonb) "
+            "VALUES (:id, :org, :job, :agent, 'running', :sched, :ats, :sts, :skew, :host, :seq, CAST(:meta AS jsonb)) "
             "ON CONFLICT (id, scheduled_ts) DO UPDATE SET status='running', agent_ts_start=EXCLUDED.agent_ts_start, sequence_max=GREATEST(executions.sequence_max, EXCLUDED.sequence_max)"),
             {"id": exec_id, "org": org, "job": job_id, "agent": ev.get("agent_id"), "sched": agent_ts or server_ts,
              "ats": agent_ts or server_ts, "sts": server_ts, "skew": skew_ms, "host": ev.get("host"), "seq": ev.get("sequence", 0),
@@ -86,7 +87,7 @@ def process(s, ev: dict) -> dict | None:
             start = end_ts if duration is None else datetime.fromtimestamp(end_ts.timestamp() - duration / 1000, tz=UTC)
             s.execute(text(
                 "INSERT INTO executions (id, org_id, job_id, agent_id, status, scheduled_ts, agent_ts_start, agent_ts_end, server_received_ts, skew_ms, duration_ms, exit_code, host, sequence_max, meta) "
-                "VALUES (:id, :org, :job, :agent, :st, :sched, :start, :end, :sts, :skew, :dur, :ec, :host, :seq, :meta::jsonb) ON CONFLICT DO NOTHING"),
+                "VALUES (:id, :org, :job, :agent, :st, :sched, :start, :end, :sts, :skew, :dur, :ec, :host, :seq, CAST(:meta AS jsonb)) ON CONFLICT DO NOTHING"),
                 {"id": exec_id, "org": org, "job": job_id, "agent": ev.get("agent_id"), "st": final, "sched": start, "start": start, "end": end_ts,
                  "sts": server_ts, "skew": skew_ms, "dur": duration, "ec": ev.get("exit_code"), "host": ev.get("host"), "seq": ev.get("sequence", 0),
                  "meta": __import__("json").dumps(ev.get("meta", {}))})

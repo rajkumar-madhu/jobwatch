@@ -1,6 +1,7 @@
 """LLM adapter. Default: OpenAI-compatible endpoint (vLLM / Ollama / llama.cpp server) — self-hosted (D12).
 Set COPILOT_BASE_URL, COPILOT_MODEL, COPILOT_API_KEY. Anthropic-compatible adapter behind COPILOT_PROVIDER=anthropic."""
-import json, time
+import json
+import time
 
 import httpx
 

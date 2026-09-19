@@ -1,9 +1,11 @@
 """Keycloak OIDC authorization-code flow → httpOnly session cookie (D1).
 Session = signed JWT {sub, email, name, org_id?} using SECRET_ENCRYPTION_KEY. CSRF: SameSite=Lax + state param."""
-import secrets, time
+import secrets
+import time
 from urllib.parse import urlencode
 
-import httpx, redis
+import httpx
+import redis
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from jose import jwt

@@ -1,19 +1,36 @@
 """JobWatch API service."""
 import logging
+import time as _time
 from contextlib import asynccontextmanager
 
 import structlog
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 from sqlalchemy import text
 
 from . import events
 from .config import settings
 from .db import engine
-from .routers import agents, alerting, analytics, auth as authr, billing, copilot, executions, incidents, integrations, jobs, k8s, logs, org, overview, status_pages, topology
-from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
-from fastapi.responses import Response
-import time as _time
+from .routers import (
+    agents,
+    alerting,
+    analytics,
+    billing,
+    copilot,
+    executions,
+    incidents,
+    integrations,
+    jobs,
+    k8s,
+    logs,
+    org,
+    overview,
+    status_pages,
+    topology,
+)
+from .routers import auth as authr
 
 logging.basicConfig(level=settings.log_level)
 log = structlog.get_logger()
