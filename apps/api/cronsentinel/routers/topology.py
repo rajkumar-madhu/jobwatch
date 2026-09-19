@@ -30,12 +30,20 @@ def dependencies(p: Principal = Depends(current_principal)):
 def add_dependency(body: DepIn, request: Request, p: Principal = Depends(require_role("developer"))):
     if body.job_id == body.depends_on_job_id: raise HTTPException(400, "a job cannot depend on itself")
     with tenant_session(p.org_id) as s:
+        # Both jobs must exist *in this tenant*. Without this the FK violation surfaced as a 500,
+        # and the error told a caller nothing about which id was wrong. RLS means a job in another
+        # org is simply not visible here, so this doubles as the tenancy check.
+        found = {str(r.id) for r in s.execute(text("SELECT id FROM jobs WHERE id = ANY(CAST(:ids AS uuid[]))"),
+                                              {"ids": [str(body.job_id), str(body.depends_on_job_id)]}).all()}
+        missing = [i for i in (str(body.job_id), str(body.depends_on_job_id)) if i not in found]
+        if missing:
+            raise HTTPException(404, f"unknown job id(s): {', '.join(missing)}")
         # cycle check: would depends_on already (transitively) depend on job?
         cyc = s.execute(text("""WITH RECURSIVE up AS (SELECT depends_on_job_id AS j FROM job_dependencies WHERE job_id=:d
             UNION SELECT jd.depends_on_job_id FROM job_dependencies jd JOIN up ON jd.job_id=up.j) SELECT 1 FROM up WHERE j=:j LIMIT 1"""), {"d": str(body.depends_on_job_id), "j": str(body.job_id)}).first()
         if cyc: raise HTTPException(409, "would create a cycle")
         s.execute(text("INSERT INTO job_dependencies (org_id, job_id, depends_on_job_id) VALUES (:o, :j, :d) ON CONFLICT DO NOTHING"), {"o": str(p.org_id), "j": str(body.job_id), "d": str(body.depends_on_job_id)})
-        audit(s, p, "dependency.add", "job", str(body.job_id), {"depends_on": str(body.depends_on_job_id)}, request.client.host)
+        audit(s, p, "dependency.add", "job", str(body.job_id), {"depends_on": str(body.depends_on_job_id)}, request.client.host if request.client else None)
     return {"ok": True}
 
 

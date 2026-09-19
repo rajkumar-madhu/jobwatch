@@ -85,7 +85,10 @@ def readyz():
     when the broker is unreachable so traffic is shed rather than silently dropped."""
     with engine.connect() as c:
         c.execute(text("SELECT 1"))
-    nats_ok = app.state.js is not None and events.is_connected()
+    # getattr: app.state.js is only set by the lifespan handler, so any caller that reaches
+    # /readyz before startup finished (or in a test without lifespan) got AttributeError -> 500
+    # instead of an honest 'not ready'.
+    nats_ok = getattr(app.state, "js", None) is not None and events.is_connected()
     if not nats_ok:
         raise HTTPException(503, "nats unavailable")
     return {"status": "ready", "nats": True}

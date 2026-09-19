@@ -58,7 +58,14 @@ def test_overdue_slots_become_missed_and_job_failing(make_job, org):
     states = [x.state for x in _slots(j) if x.scheduled_for < now() - timedelta(seconds=90)]
     assert states and all(st == "missed" for st in states)
     jb = _job(j)
-    assert jb.job_state == "failing" and jb.status == "missed" and jb.consecutive_failures == len(states)
+    # Whether the newest slot is still inside its grace window depends on where "now" falls in the
+    # */5 cycle, so an open LATE slot is a legitimate outcome — derive() puts open_late ahead of the
+    # last settled slot on purpose. Assert on what is actually invariant.
+    open_late = any(x.state == "late" for x in _slots(j))
+    assert jb.job_state == ("late" if open_late else "failing"), f"state={jb.job_state} open_late={open_late}"
+    assert jb.consecutive_failures == len(states)
+    if not open_late:
+        assert jb.status == "missed"
     assert any(c["job_id"] == str(j) and c["new_state"] == "failing" for c in changes)
     with system_session() as s:  # synthetic execution rows exist for the run strip / SLA
         assert s.execute(text("SELECT count(*) FROM executions WHERE job_id=:j AND status='missed'"), {"j": j}).scalar() == len(states)

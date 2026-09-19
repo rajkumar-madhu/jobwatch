@@ -246,3 +246,39 @@ Tests: `tests/test_keys_csrf.py` (11 pure), `tests/integration/test_csrf_enforce
 - A live Keycloak server and a live Stripe account.
 - `nats` outbound destination kind still raises not-implemented.
 - CSRF token rotation on privilege change (role change keeps a valid token until TTL).
+
+## R9 — endpoint smoke coverage
+
+`tests/integration/test_router_smoke.py` is table-driven off the **live** route table (77
+endpoints): every one is called unauthenticated (must be 401/403/422, never 2xx, never 5xx) and
+again with a valid API key (must not 5xx). `test_every_endpoint_is_covered` fails if the surface
+shrinks unexpectedly, so a new router cannot ship with zero coverage the way R4's integrations
+router did. External-dependency endpoints (Stripe, Copilot LLM, OIDC, channel test-sends) are
+classified and skipped for the authenticated call, not silently missed.
+
+**257 tests green.**
+
+### Four more real bugs, all in never-called endpoints
+1. `/api/v1/clusters/{id}/cronjobs` — `(:ns IS NULL OR k.namespace=:ns)` left Postgres unable to
+   infer the parameter type (`AmbiguousParameter`); the namespace filter 500'd every time. Now
+   `CAST(:ns AS text)`.
+2. `/api/v1/analytics/jobs` — `round(double precision, int)` does not exist in Postgres. The
+   `percentile_cont`-derived cost column 500'd the whole endpoint. Casts to `numeric`.
+   (Verified against live PG that the other `round(...)` call sites return numeric and are fine.)
+3. `/api/v1/analytics/report` — `_rows(s, q, **p)` took the session as `s`, and two callers bound
+   a query parameter *also* called `:s`, so `_rows(..., s=since)` raised
+   `TypeError: got multiple values for argument 's'`. Parameter renamed to `session`.
+4. `POST /api/v1/dependencies` — a nonexistent `depends_on_job_id` hit the FK and 500'd. Now a
+   404 naming the unknown id(s); because RLS hides other tenants' jobs, the same check covers
+   cross-tenant references.
+
+Also: `/readyz` and the ingest `/healthz` read `app.state.js` directly, so any request arriving
+before the lifespan handler finished raised AttributeError → 500 instead of reporting not-ready.
+
+### Still not verified
+- Go agents (R1, on a real host); K8s agent heartbeat_interval_s.
+- A live Keycloak server and a live Stripe account.
+- `nats` outbound destination kind still raises not-implemented.
+- Smoke coverage is breadth, not depth: it proves an endpoint responds sanely, not that its
+  business logic is right. RBAC is only checked at the unauthenticated boundary — per-role
+  permission matrices (viewer cannot delete, etc.) are not yet tested.

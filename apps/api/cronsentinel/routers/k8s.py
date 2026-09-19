@@ -117,6 +117,6 @@ def cluster_cronjobs(cluster_id: UUID, p: Principal = Depends(current_principal)
               k.last_schedule_at, k.last_success_at, k.image, j.id AS job_id, j.status::text, j.reliability_score,
               (SELECT count(*) FROM executions e WHERE e.job_id=j.id AND e.status IN ('failed','timeout','missed') AND e.scheduled_ts >= now() - interval '7 days') AS failures_7d,
               (SELECT failure_reason FROM executions e WHERE e.job_id=j.id AND failure_reason IS NOT NULL ORDER BY scheduled_ts DESC LIMIT 1) AS last_reason
-            FROM k8s_cronjobs k LEFT JOIN jobs j ON j.id=k.job_id WHERE k.cluster_id=:c AND (:ns IS NULL OR k.namespace=:ns) ORDER BY k.namespace, k.name"""), {"c": str(cluster_id), "ns": namespace}).all()
+            FROM k8s_cronjobs k LEFT JOIN jobs j ON j.id=k.job_id WHERE k.cluster_id=:c AND (CAST(:ns AS text) IS NULL OR k.namespace = CAST(:ns AS text)) ORDER BY k.namespace, k.name"""), {"c": str(cluster_id), "ns": namespace}).all()
         events = s.execute(text("SELECT namespace, object_kind, object_name, reason, message, ts FROM k8s_events WHERE cluster_id=:c ORDER BY ts DESC LIMIT 50"), {"c": str(cluster_id)}).all()
     return {"cronjobs": [dict(r._mapping) for r in rows], "events": [dict(r._mapping) for r in events]}

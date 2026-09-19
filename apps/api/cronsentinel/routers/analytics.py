@@ -10,7 +10,10 @@ from ..db import tenant_session
 router = APIRouter(prefix="/api/v1/analytics", tags=["analytics"])
 
 
-def _rows(s, q, **p): return [dict(r._mapping) for r in s.execute(text(q), p).all()]
+def _rows(session, q, **p):
+    """`session` is deliberately not named `s`: two callers bind a parameter called :s, which
+    collided with the positional argument and raised TypeError at request time."""
+    return [dict(r._mapping) for r in session.execute(text(q), p).all()]
 
 
 @router.get("/series")
@@ -33,11 +36,11 @@ def per_job(p: Principal = Depends(current_principal), days: int = Query(30, le=
             WITH x AS (SELECT job_id, status, duration_ms, scheduled_ts, ntile(2) OVER (PARTITION BY job_id ORDER BY scheduled_ts) AS half FROM executions WHERE scheduled_ts >= now() - (:d || ' days')::interval AND status<>'running')
             SELECT j.id, j.name, j.status::text, j.reliability_score, j.sla_target, j.tags,
               count(x.*) AS runs, count(*) FILTER (WHERE x.status='success') AS ok, count(*) FILTER (WHERE x.status IN ('failed','timeout')) AS failures, count(*) FILTER (WHERE x.status='missed') AS missed,
-              round(100.0*count(*) FILTER (WHERE x.status='success')/NULLIF(count(x.*),0), 2) AS success_rate,
+              round((100.0*count(*) FILTER (WHERE x.status='success')/NULLIF(count(x.*),0))::numeric, 2) AS success_rate,
               percentile_cont(0.5) WITHIN GROUP (ORDER BY x.duration_ms) AS p50_ms, percentile_cont(0.95) WITHIN GROUP (ORDER BY x.duration_ms) AS p95_ms, max(x.duration_ms) AS max_ms,
-              round(100.0 * (avg(x.duration_ms) FILTER (WHERE x.half=2) - avg(x.duration_ms) FILTER (WHERE x.half=1)) / NULLIF(avg(x.duration_ms) FILTER (WHERE x.half=1),0), 1) AS drift_pct,
-              CASE WHEN j.sla_target IS NULL THEN NULL ELSE round(100.0*count(*) FILTER (WHERE x.status='success')/NULLIF(count(x.*),0),2) >= j.sla_target END AS sla_met,
-              round(count(x.*) * COALESCE(percentile_cont(0.5) WITHIN GROUP (ORDER BY x.duration_ms),0) / 3600000.0 * :rate, 2) AS est_cost_usd
+              round((100.0 * (avg(x.duration_ms) FILTER (WHERE x.half=2) - avg(x.duration_ms) FILTER (WHERE x.half=1)) / NULLIF(avg(x.duration_ms) FILTER (WHERE x.half=1),0))::numeric, 1) AS drift_pct,
+              CASE WHEN j.sla_target IS NULL THEN NULL ELSE round((100.0*count(*) FILTER (WHERE x.status='success')/NULLIF(count(x.*),0))::numeric, 2) >= j.sla_target END AS sla_met,
+              round((count(x.*) * COALESCE(percentile_cont(0.5) WITHIN GROUP (ORDER BY x.duration_ms),0) / 3600000.0 * :rate)::numeric, 2) AS est_cost_usd
             FROM jobs j LEFT JOIN x ON x.job_id=j.id GROUP BY j.id ORDER BY {order}""", d=days, rate=0.05)  # est_cost: compute-hours × $0.05 placeholder; TODO per-org rate
 
 
