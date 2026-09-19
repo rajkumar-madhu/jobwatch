@@ -196,3 +196,27 @@ against a throwaway HTTP receiver. CI gained redis + nats services. 73 tests gre
 - `nats` outbound destination kind (still raises not-implemented).
 - `events.connect()` retries forever by default: a bad NATS_URL hangs a worker silently rather than
   crash-looping. Consider max_reconnect_attempts + a readiness probe.
+
+## R7 — Keycloak OIDC + Stripe webhook
+
+`cronsentinel/oidc.py` (new) replaces the `get_unverified_claims` stub with full id_token
+verification; `/auth/login` issues a nonce and `/auth/callback` verifies signature, iss, aud, exp
+and nonce, refetching the JWKS once on failure. Stripe `_verify` now accepts any of several `v1=`
+signatures (secret rotation) and malformed events 400 without recording the event id.
+
+Tests: `tests/test_oidc.py` (11 pure — wrong key, alg none, HS256 confusion, wrong iss/aud, expired,
+nonce replay, unknown kid, multi-aud azp), `tests/integration/test_auth_flow.py` (7, fake OIDC
+provider over real HTTP + Redis + DB), `tests/integration/test_stripe_webhook.py` (10, real DB).
+**101 tests green.**
+
+### Two more real bugs
+1. Stripe `_verify` built a dict from the signature header, keeping only the last `v1=` — during a
+   webhook-secret rotation Stripe sends several and half the events would have been rejected.
+2. `checkout.session.completed` without metadata raised KeyError → 500, and Stripe would retry into
+   the same 500 forever.
+
+### Still not verified
+- Go agents (R1, on a real host). K8s agent heartbeat_interval_s.
+- A live Keycloak server (flow proven against a fake provider) and a live Stripe account.
+- `nats` outbound destination kind still raises not-implemented.
+- `events.connect()` retries forever: a bad NATS_URL hangs a worker silently.

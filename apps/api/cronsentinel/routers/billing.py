@@ -57,11 +57,29 @@ def portal(p: Principal = Depends(require_role("admin"))):
     return {"url": _stripe("POST", "/billing_portal/sessions", {"customer": cust, "return_url": f"{settings.web_public_url}/billing"})["url"]}
 
 
+TOLERANCE_S = 300
+
+
 def _verify(payload: bytes, sig_header: str) -> bool:
+    """Stripe's scheme: `t=<ts>,v1=<hex>[,v1=<hex>...]`. During a secret rotation Stripe signs with
+    both the old and the new secret and sends several `v1=` values in no guaranteed order, so we
+    must accept *any* match — building a dict here kept only the last one and dropped half the
+    events mid-rotation."""
     try:
-        parts = dict(kv.split("=", 1) for kv in sig_header.split(","))
-        expected = hmac.new(settings.stripe_webhook_secret.encode(), f"{parts['t']}.".encode() + payload, hashlib.sha256).hexdigest()
-        return hmac.compare_digest(expected, parts["v1"]) and abs(time.time() - int(parts["t"])) < 300
+        ts = None
+        sigs = []
+        for kv in sig_header.split(","):
+            k, _, v = kv.strip().partition("=")
+            if k == "t":
+                ts = int(v)
+            elif k == "v1":
+                sigs.append(v)
+        if ts is None or not sigs:
+            return False
+        if abs(time.time() - ts) > TOLERANCE_S:   # replay window
+            return False
+        expected = hmac.new(settings.stripe_webhook_secret.encode(), f"{ts}.".encode() + payload, hashlib.sha256).hexdigest()
+        return any(hmac.compare_digest(expected, s) for s in sigs)
     except Exception:
         return False
 
@@ -70,14 +88,26 @@ def _verify(payload: bytes, sig_header: str) -> bool:
 async def webhook(request: Request, stripe_signature: str = Header(default="")):
     raw = await request.body()
     if not settings.stripe_webhook_secret or not _verify(raw, stripe_signature): raise HTTPException(400, "bad signature")
-    ev = json.loads(raw); obj = ev["data"]["object"]
+    try:
+        ev = json.loads(raw)
+        obj = ev["data"]["object"]
+        ev_id, ev_type = ev["id"], ev["type"]
+    except (ValueError, KeyError, TypeError) as e:
+        # Malformed beyond use: 400 so Stripe stops retrying, and nothing is recorded.
+        raise HTTPException(400, f"unparseable event: {e}") from e
     with system_session() as s:
-        if s.execute(text("INSERT INTO stripe_events (id, type) VALUES (:i, :t) ON CONFLICT DO NOTHING RETURNING 1"), {"i": ev["id"], "t": ev["type"]}).first() is None:
+        if s.execute(text("INSERT INTO stripe_events (id, type) VALUES (:i, :t) ON CONFLICT DO NOTHING RETURNING 1"), {"i": ev_id, "t": ev_type}).first() is None:
             return {"ok": True, "duplicate": True}
-        t = ev["type"]
+        t = ev_type
         if t == "checkout.session.completed":
-            s.execute(text("UPDATE subscriptions SET stripe_subscription_id=:sid, plan=:p, status='active' WHERE org_id=:o"), {"sid": obj.get("subscription"), "p": obj["metadata"]["plan"], "o": obj["metadata"]["org_id"]})
-            s.execute(text("UPDATE organizations SET plan=:p WHERE id=:o"), {"p": obj["metadata"]["plan"], "o": obj["metadata"]["org_id"]})
+            md = obj.get("metadata") or {}
+            plan, org_id = md.get("plan"), md.get("org_id")
+            if not plan or not org_id:
+                # Our own checkout always sets both; anything else is not ours to act on. Raising
+                # here rolls back the stripe_events insert too, so a corrected retry still lands.
+                raise HTTPException(400, "checkout.session.completed without plan/org_id metadata")
+            s.execute(text("UPDATE subscriptions SET stripe_subscription_id=:sid, plan=:p, status='active' WHERE org_id=CAST(:o AS uuid)"), {"sid": obj.get("subscription"), "p": plan, "o": org_id})
+            s.execute(text("UPDATE organizations SET plan=:p WHERE id=CAST(:o AS uuid)"), {"p": plan, "o": org_id})
         elif t in ("customer.subscription.updated", "customer.subscription.deleted"):
             price = obj["items"]["data"][0]["price"]["id"] if obj.get("items") else None
             plan = s.execute(text("SELECT plan FROM plan_limits WHERE stripe_price_id=:p"), {"p": price}).scalar() if price else None

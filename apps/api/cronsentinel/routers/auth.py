@@ -1,5 +1,6 @@
 """Keycloak OIDC authorization-code flow → httpOnly session cookie (D1).
 Session = signed JWT {sub, email, name, org_id?} using SECRET_ENCRYPTION_KEY. CSRF: SameSite=Lax + state param."""
+import json
 import secrets
 import time
 from urllib.parse import urlencode
@@ -14,6 +15,7 @@ from sqlalchemy import text
 
 from ..config import settings
 from ..db import system_session
+from ..oidc import IdTokenError, fetch_jwks, verify_id_token
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 _r = redis.Redis.from_url(settings.redis_url, decode_responses=True)
@@ -45,26 +47,47 @@ def _set_cookie(resp: Response, tok: str):
 @router.get("/login")
 def login(next: str = "/"):
     state = secrets.token_urlsafe(24)
-    _r.setex(f"oauth:{state}", 600, next)
+    nonce = secrets.token_urlsafe(24)
+    # state and nonce are stored together: state binds the redirect, nonce binds the id_token to
+    # this login attempt so a replayed code cannot mint a session.
+    _r.setex(f"oauth:{state}", 600, json.dumps({"next": next, "nonce": nonce}))
     q = urlencode({"client_id": settings.keycloak_client_id, "response_type": "code", "scope": "openid email profile",
-                   "redirect_uri": f"{settings.api_public_url}/auth/callback", "state": state})
+                   "redirect_uri": f"{settings.api_public_url}/auth/callback", "state": state, "nonce": nonce})
     return RedirectResponse(f"{_discovery()['authorization_endpoint']}?{q}")
 
 
 @router.get("/callback")
 def callback(code: str, state: str):
-    nxt = _r.get(f"oauth:{state}")
-    if not nxt: raise HTTPException(400, "invalid state")
-    _r.delete(f"oauth:{state}")
+    saved = _r.get(f"oauth:{state}")
+    if not saved: raise HTTPException(400, "invalid state")
+    _r.delete(f"oauth:{state}")   # single use: a replayed callback fails the state lookup
+    try:
+        parsed = json.loads(saved)
+        nxt, nonce = parsed["next"], parsed["nonce"]
+    except (ValueError, KeyError, TypeError):
+        nxt, nonce = saved, None   # tolerate sessions started before the nonce change
     tok = httpx.post(_discovery()["token_endpoint"], data={"grant_type": "authorization_code", "code": code, "redirect_uri": f"{settings.api_public_url}/auth/callback",
                                                             "client_id": settings.keycloak_client_id, "client_secret": settings.keycloak_client_secret}, timeout=10)
     if tok.status_code != 200: raise HTTPException(401, "token exchange failed")
-    claims = jwt.get_unverified_claims(tok.json()["id_token"])  # signature verified by TLS to Keycloak; TODO verify against JWKS too
+    disc = _discovery()
+    try:
+        claims = verify_id_token(tok.json()["id_token"], jwks=fetch_jwks(disc["jwks_uri"]),
+                                 issuer=disc["issuer"], audience=settings.keycloak_client_id, nonce=nonce)
+    except IdTokenError:
+        # a rotated signing key looks exactly like a bad signature: refetch once before rejecting
+        try:
+            claims = verify_id_token(tok.json()["id_token"], jwks=fetch_jwks(disc["jwks_uri"], force=True),
+                                     issuer=disc["issuer"], audience=settings.keycloak_client_id, nonce=nonce)
+        except IdTokenError as e:
+            raise HTTPException(401, f"invalid id_token: {e}") from e
+    email = claims.get("email")
+    if not email:
+        raise HTTPException(401, "id_token has no email claim (is the 'email' scope granted?)")
     with system_session() as s:
         uid = s.execute(text("INSERT INTO users (keycloak_sub, email, name) VALUES (:sub, :e, :n) ON CONFLICT (email) DO UPDATE SET keycloak_sub=EXCLUDED.keycloak_sub, name=COALESCE(EXCLUDED.name, users.name) RETURNING id"),
-                        {"sub": claims["sub"], "e": claims["email"], "n": claims.get("name")}).scalar()
+                        {"sub": claims["sub"], "e": email, "n": claims.get("name")}).scalar()
         org = s.execute(text("SELECT org_id FROM memberships WHERE user_id=:u ORDER BY created_at LIMIT 1"), {"u": uid}).scalar()
-    sess = sign_session({"sub": claims["sub"], "uid": str(uid), "email": claims["email"], "name": claims.get("name"), "org_id": str(org) if org else None})
+    sess = sign_session({"sub": claims["sub"], "uid": str(uid), "email": email, "name": claims.get("name"), "org_id": str(org) if org else None})
     resp = RedirectResponse(f"{settings.web_public_url}{nxt if org else '/onboarding'}")
     _set_cookie(resp, sess)
     return resp
