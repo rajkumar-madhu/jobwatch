@@ -6,11 +6,12 @@ from sqlalchemy import text
 
 from ..auth import Principal, current_principal
 from ..db import tenant_session
+from ..schemas import LogSearchOut
 
 router = APIRouter(prefix="/api/v1/logs", tags=["logs"])
 
 
-@router.get("/search")
+@router.get("/search", response_model=LogSearchOut)
 def search(p: Principal = Depends(current_principal), q: str | None = None, job_id: str | None = None, stream: str | None = None,
            host: str | None = None, status: str | None = None, since: datetime | None = None, until: datetime | None = None, limit: int = Query(100, le=500)):
     where, params = ["l.org_id=:org"], {"org": str(p.org_id), "lim": limit}

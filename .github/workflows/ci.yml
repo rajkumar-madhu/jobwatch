@@ -33,6 +33,15 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: "3.12"}
       - run: cd apps/web && (npm ci --no-audit || npm install)
+      # R15: regenerate types from the live spec and fail if the checked-in file is stale, so
+      # lib/api-types.ts cannot drift from the API's actual response models.
+      - run: pip install -e apps/api
+        env: {DATABASE_URL: "postgresql+psycopg://u:p@localhost/db", SECRET_ENCRYPTION_KEY: ci}
+      - run: |
+          cd apps/api && python -c "import json;from cronsentinel.main import app;json.dump(app.openapi(),open('../web/openapi.json','w'),indent=2)"
+        env: {DATABASE_URL: "postgresql+psycopg://u:p@localhost/db", SECRET_ENCRYPTION_KEY: ci}
+      - run: cd apps/web && npm run types:gen && git diff --exit-code lib/api-types.ts openapi.json
+      - run: cd apps/web && npm run typecheck
       - run: cd apps/web && npm test            # vitest: lib/format + lib/api CSRF logic
       - run: cd apps/web && npm run build
       # e2e against the mock API in tools/ui-review — no DB, deterministic fixtures

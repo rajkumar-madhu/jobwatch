@@ -211,3 +211,125 @@ class OverviewOut(BaseModel):
     top_failing_7d: list[NamedMetric] = []
     mttd_min: float | None = None
     mttr_min: float | None = None
+
+
+# ---------------------------------------------------------------------------
+# R15 — models for the reads R14 left as bare dicts. Same rule as R14: these describe what the
+# routers already return, verified by the suite passing unchanged.
+# ---------------------------------------------------------------------------
+
+
+class AgentOut(BaseModel):
+    id: UUID
+    kind: str
+    name: str | None = None
+    host_id: str | None = None
+    version: str | None = None
+    status: str | None = None
+    last_seen_at: datetime | None = None
+    skew_ms: int | None = None
+    revoked_at: datetime | None = None
+    created_at: datetime
+    jobs: int = 0
+
+
+class ClusterOut(BaseModel):
+    id: UUID
+    name: str
+    scope: str | None = None
+    namespaces: list[str] | None = None
+    last_seen_at: datetime | None = None
+    version: str | None = None
+    cronjobs: int = 0
+    failing: int = 0
+
+
+class TopologyJob(BaseModel):
+    id: UUID
+    name: str
+    status: str
+
+
+class TopologyUser(BaseModel):
+    name: str
+    status: str
+    jobs: list[TopologyJob] = []
+
+
+class TopologyServer(BaseModel):
+    id: UUID
+    name: str | None = None
+    status: str
+    users: list[TopologyUser] = []
+
+
+class TopologyNamespace(BaseModel):
+    name: str
+    status: str
+    jobs: list[TopologyJob] = []
+
+
+class TopologyCluster(BaseModel):
+    id: UUID
+    name: str
+    status: str
+    namespaces: list[TopologyNamespace] = []
+
+
+class TopologyOut(BaseModel):
+    servers: list[TopologyServer] = []
+    clusters: list[TopologyCluster] = []
+    # Jobs attached to neither a server nor a cluster (pure heartbeat jobs).
+    heartbeat_only: list[TopologyJob] = []
+    status: str
+
+
+class LogHit(BaseModel):
+    """Loose by design: a log row's columns depend on the backing store."""
+
+    model_config = {"extra": "allow"}
+
+
+class LogSearchOut(BaseModel):
+    items: list[LogHit] = []
+    hosts: list[str] = []
+
+
+class SeriesPoint(BaseModel):
+    t: datetime
+    executions: int
+    ok: int
+    failed: int
+    missed: int
+    p50_ms: float | None = None
+    p95_ms: float | None = None
+
+
+class SeriesIncident(BaseModel):
+    model_config = {"extra": "allow"}
+
+
+class SeriesOut(BaseModel):
+    bucket: str
+    points: list[SeriesPoint] = []
+    incidents: list[SeriesIncident] = []
+
+
+class JobAnalyticsOut(BaseModel):
+    id: UUID
+    name: str
+    status: str
+    reliability_score: int | None = None
+    sla_target: float | None = None
+    tags: list[str] = []
+    runs: int
+    ok: int
+    failures: int
+    missed: int
+    success_rate: float | None = None
+    p50_ms: float | None = None
+    p95_ms: float | None = None
+    max_ms: int | None = None
+    drift_pct: float | None = None
+    sla_met: bool | None = None
+    est_cost_usd: float | None = None

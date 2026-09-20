@@ -70,7 +70,7 @@ export default function OverviewPage() {
           <div>
             <h2 className="mb-2 text-sm font-medium">Slowest jobs, 7 days (p95)</h2>
             <ul className="tbl rounded-lg border border-line">{d?.top_slowest_7d.map((r) => (
-              <li key={r.name} className="row grid-cols-[1fr_auto]"><span className="truncate">{r.name}</span><span className="font-mono text-xs">{dur(r.p95_ms)}</span></li>))}
+              <li key={r.name} className="row grid-cols-[1fr_auto]"><span className="truncate">{r.name}</span><span className="font-mono text-xs">{dur(r.p95_ms ?? null)}</span></li>))}
               {d?.top_slowest_7d.length === 0 && <li className="px-4 py-3 text-sm text-mute">No completed runs yet.</li>}</ul>
           </div>
           <div>

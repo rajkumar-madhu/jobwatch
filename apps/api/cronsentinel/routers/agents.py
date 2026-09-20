@@ -20,6 +20,7 @@ from ..auth import (
 )
 from ..config import settings
 from ..db import system_session, tenant_session
+from ..schemas import AgentOut
 
 admin = APIRouter(prefix="/api/v1/agents", tags=["agents"])
 agent = APIRouter(prefix="/agent/v1", tags=["agent-ingest"])
@@ -42,7 +43,7 @@ def bootstrap_token(body: BootstrapIn, request: Request, p: Principal = Depends(
             "install": f"curl -fsSL https://<server>/install.sh | sudo bash -s -- --server https://<ingest> --token {tok}"}
 
 
-@admin.get("")
+@admin.get("", response_model=list[AgentOut])
 def list_agents(p: Principal = Depends(current_principal)):
     with tenant_session(p.org_id) as s:
         rows = s.execute(text("SELECT id, kind, name, host_id, version, status, last_seen_at, skew_ms, revoked_at, created_at, "

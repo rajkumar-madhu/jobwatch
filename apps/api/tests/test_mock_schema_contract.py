@@ -32,18 +32,18 @@ COVERED = {
     "/api/v1/workspaces": "/api/v1/workspaces",
     "/api/v1/analytics/overview": "/api/v1/analytics/overview",
     "/api/v1/dependencies": "/api/v1/dependencies",
+    # R15 additions
+    "/api/v1/agents": "/api/v1/agents",
+    "/api/v1/clusters": "/api/v1/clusters",
+    "/api/v1/topology": "/api/v1/topology",
+    "/api/v1/analytics/jobs": "/api/v1/analytics/jobs",
 }
 
 # Read endpoints the dashboard uses that still return a bare dict. Each one is a gap: the mock's
 # shape for it is unvalidated. Shrink this list by adding a response_model, do not delete entries.
-UNMODELLED = {
-    "/api/v1/agents",
-    "/api/v1/clusters",
-    "/api/v1/topology",
-    "/api/v1/logs/search",
-    "/api/v1/analytics/series",
-    "/api/v1/analytics/jobs",
-}
+# R15 modelled all six that were listed here. Empty is the goal state; the assertion below still
+# guards the other direction, so a new bare-dict read endpoint has to be added here consciously.
+UNMODELLED: set[str] = set()
 
 
 @pytest.fixture(scope="module")

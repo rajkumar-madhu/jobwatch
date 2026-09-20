@@ -6,6 +6,7 @@ from sqlalchemy import text
 
 from ..auth import Principal, current_principal
 from ..db import tenant_session
+from ..schemas import SeriesOut, JobAnalyticsOut
 
 router = APIRouter(prefix="/api/v1/analytics", tags=["analytics"])
 
@@ -16,7 +17,7 @@ def _rows(session, q, **p):
     return [dict(r._mapping) for r in session.execute(text(q), p).all()]
 
 
-@router.get("/series")
+@router.get("/series", response_model=SeriesOut)
 def series(p: Principal = Depends(current_principal), days: int = Query(14, le=90), bucket: str = "day"):
     b = "hour" if bucket == "hour" else "day"
     with tenant_session(p.org_id) as s:
@@ -28,7 +29,7 @@ def series(p: Principal = Depends(current_principal), days: int = Query(14, le=9
                 "incidents": _rows(s, f"SELECT date_trunc('{b}', started_at) AS t, count(*) AS n FROM incidents WHERE started_at >= now() - (:d || ' days')::interval GROUP BY 1 ORDER BY 1", d=days)}
 
 
-@router.get("/jobs")
+@router.get("/jobs", response_model=list[JobAnalyticsOut])
 def per_job(p: Principal = Depends(current_principal), days: int = Query(30, le=365), sort: str = "reliability"):
     order = {"reliability": "reliability_score ASC NULLS LAST", "failures": "failures DESC", "p95": "p95_ms DESC NULLS LAST", "drift": "drift_pct DESC NULLS LAST"}.get(sort, "reliability_score ASC NULLS LAST")
     with tenant_session(p.org_id) as s:

@@ -427,3 +427,43 @@ is **unvalidated**. The test asserts the list in both directions: a new bare-dic
 must be acknowledged, and adding a model must remove its entry, so coverage cannot quietly stay
 flat. Note `/clusters`, `/topology` and `/agents` are also the endpoints R13 could not seed — they
 are the least-tested surface in the product.
+
+## R15 — full read coverage, and generated frontend types
+
+Two things: close the R14 gap list, then make the frontend bind to the spec at compile time.
+362 backend tests, 20 vitest, 44 Playwright (desktop + mobile).
+
+### Response models: 11 → 17
+`AgentOut`, `ClusterOut`, `TopologyOut` (+ server/user/namespace/job nodes), `LogSearchOut`,
+`SeriesOut`, `JobAnalyticsOut`. `UNMODELLED` in `tests/test_mock_schema_contract.py` is now empty;
+the assertion still guards the other direction, so a new bare-dict read endpoint must be added
+there consciously. Contract coverage went from 8 endpoints to 12.
+
+`LogHit` and `SeriesIncident` are deliberately `extra="allow"` — a log row's columns depend on the
+backing store, so pinning them would be a false contract.
+
+### Drift this found
+The mock omitted `created_at` on agents. Same class of bug as R14: the frontend was developed
+against rows production never sends.
+
+### Generated TypeScript types
+`apps/web/lib/api-types.ts` is generated from the spec with `openapi-typescript`; `lib/api.ts`
+re-exports friendly aliases (`Job`, `Incident`, `Agent`, …) over it. The hand-written interfaces
+it replaced are gone. `JobStatus` stays hand-written on purpose: it is a DB enum that the
+generated types widen to `string`, and narrowing it keeps exhaustive switches working.
+
+Regenerate:
+```bash
+cd apps/api && python -c "import json;from cronsentinel.main import app;json.dump(app.openapi(),open('../web/openapi.json','w'),indent=2)"
+cd apps/web && npm run types:gen
+```
+CI regenerates and runs `git diff --exit-code`, so a checked-in file that lags the API fails the
+build. `npm run typecheck` now runs in CI too.
+
+**A real bug the types caught immediately:** the overview page rendered `r.p95_ms` as
+`number | null`, but the API declares it optional, so an omitted field would have reached `dur()`
+as `undefined`. Hand-written interfaces had hidden this.
+
+### Limits
+Only response shapes are typed. Request bodies, query parameters and status codes are not, so a
+wrong POST body is still a runtime 422. Typing those is the next increment if it is wanted.

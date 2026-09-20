@@ -8,7 +8,7 @@ from sqlalchemy import text
 from ..alerting.correlation import downstream_impact
 from ..auth import Principal, audit, current_principal, require_role
 from ..db import tenant_session
-from ..schemas import DependencyGraph
+from ..schemas import DependencyGraph, TopologyOut
 
 router = APIRouter(prefix="/api/v1", tags=["topology"])
 
@@ -62,7 +62,7 @@ def impact(job_id: UUID, p: Principal = Depends(current_principal)):
     return {"upstream": up, "downstream": down}
 
 
-@router.get("/topology")
+@router.get("/topology", response_model=TopologyOut)
 def topology(p: Principal = Depends(current_principal)):
     """Org → (Server → User → Job) and Org → (Cluster → Namespace → CronJob). Statuses roll up worst-first."""
     RANK = {"failed": 4, "timeout": 4, "missed": 3, "late": 2, "running": 1, "recovered": 1, "healthy": 0, "unknown": 0, "paused": 0}

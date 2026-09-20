@@ -40,13 +40,42 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 export class ApiError extends Error { constructor(public status: number, msg: string) { super(msg); } }
 
+// JobStatus stays hand-written: it is a DB enum, not a response field, so the generated types
+// widen it to `string`. Narrowing it here keeps exhaustive switches in the UI working.
 export type JobStatus = "unknown" | "healthy" | "running" | "late" | "missed" | "failed" | "timeout" | "recovered" | "paused";
-export interface Job { id: string; workspace_id: string; name: string; description: string | null; kind: string; schedule_expr: string | null; schedule_human: string | null;
-  tz: string; expected_runtime_s: number | null; grace_s: number; tags: string[]; status: JobStatus; paused: boolean; last_run_at: string | null;
-  last_status: string | null; next_expected_at: string | null; reliability_score: number | null; heartbeat_token: string; }
-export interface Execution { id: string; job_id: string; status: string; scheduled_ts: string; agent_ts_start: string | null; agent_ts_end: string | null;
-  duration_ms: number | null; exit_code: number | null; host: string | null; skew_ms: number; }
-export interface Overview { total_jobs: number; by_status: Record<string, number>; executions_today: number; success_rate_today: number | null;
-  top_slowest_7d: { name: string; p95_ms: number }[]; top_failing_7d: { name: string; failures: number }[]; }
-export interface Incident { id: string; severity: string; status: string; title: string; started_at: string; acknowledged_at: string | null; resolved_at: string | null;
-  affected_job_ids: string[]; job_names: string[] | null; root_cause: string | null; resolution: string | null; }
+
+// ---------------------------------------------------------------------------
+// R15 — types generated from the real API's OpenAPI spec (lib/api-types.ts).
+//
+// Regenerate after changing any response_model:
+//   cd apps/api && python -c "import json;from cronsentinel.main import app;json.dump(app.openapi(),open('../web/openapi.json','w'),indent=2)"
+//   cd apps/web && npx openapi-typescript openapi.json -o lib/api-types.ts
+// CI does this and fails if the checked-in file is stale, so the types cannot drift from the API.
+//
+// Use the aliases below rather than hand-written interfaces: `api<Job>("/api/v1/jobs/…")` is then
+// checked against what the backend actually declares, and a removed or renamed field becomes a
+// compile error instead of `undefined` at runtime.
+//
+// NOTE: only response *shapes* are covered. Endpoints without a response_model fall back to
+// `unknown` here — that is deliberate, so an unmodelled endpoint is visibly untyped.
+// ---------------------------------------------------------------------------
+import type { components } from "./api-types";
+
+type S = components["schemas"];
+
+export type Job = S["JobOut"];
+export type JobPage = S["JobPage"];
+export type Execution = S["ExecutionOut"];
+export type Incident = S["IncidentOut"];
+export type Channel = S["ChannelOut"];
+export type AlertRule = S["AlertRuleOut"];
+export type StatusPage = S["StatusPageOut"];
+export type Workspace = S["WorkspaceOut"];
+export type Overview = S["OverviewOut"];
+export type DependencyGraph = S["DependencyGraph"];
+export type Agent = S["AgentOut"];
+export type Cluster = S["ClusterOut"];
+export type Topology = S["TopologyOut"];
+export type LogSearch = S["LogSearchOut"];
+export type Series = S["SeriesOut"];
+export type JobAnalytics = S["JobAnalyticsOut"];

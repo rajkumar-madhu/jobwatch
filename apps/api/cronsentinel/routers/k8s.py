@@ -11,6 +11,7 @@ from sqlalchemy import text
 from .. import schedule
 from ..auth import Principal, current_principal
 from ..db import system_session, tenant_session
+from ..schemas import ClusterOut
 from .agents import agent_principal
 
 agent = APIRouter(prefix="/agent/v1/k8s", tags=["agent-k8s"])
@@ -100,7 +101,7 @@ async def k8s_events(body: dict, request: Request, a: dict = Depends(agent_princ
     return {"accepted": acc}
 
 
-@router.get("")
+@router.get("", response_model=list[ClusterOut])
 def list_clusters(p: Principal = Depends(current_principal)):
     with tenant_session(p.org_id) as s:
         return [dict(r._mapping) for r in s.execute(text("""
