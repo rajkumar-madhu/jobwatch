@@ -13,6 +13,7 @@ from ..auth import (
     require_role,
 )
 from ..db import tenant_session
+from ..schemas import WorkspaceOut
 
 router = APIRouter(prefix="/api/v1", tags=["org"])
 
@@ -31,7 +32,7 @@ def me(p: Principal = Depends(current_principal)):
     return {"org_id": p.org_id, "role": p.role, "user_id": p.user_id, "api_key_id": p.api_key_id}
 
 
-@router.get("/workspaces")
+@router.get("/workspaces", response_model=list[WorkspaceOut])
 def list_workspaces(p: Principal = Depends(current_principal)):
     with tenant_session(p.org_id) as s:
         return [dict(r._mapping) for r in s.execute(text("SELECT id, name, created_at FROM workspaces ORDER BY name")).all()]

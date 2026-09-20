@@ -7,7 +7,7 @@ from sqlalchemy import text
 from .. import schedule
 from ..auth import Principal, audit, current_principal, require_role
 from ..db import tenant_session
-from ..schemas import ExecutionOut, JobCreate, JobOut, JobUpdate
+from ..schemas import ExecutionOut, JobCreate, JobOut, JobUpdate, JobPage
 
 router = APIRouter(prefix="/api/v1/jobs", tags=["jobs"])
 
@@ -22,7 +22,7 @@ def _out(r) -> JobOut:
     return JobOut(**d)
 
 
-@router.get("", response_model=dict)
+@router.get("", response_model=JobPage)
 def list_jobs(p: Principal = Depends(current_principal), status: str | None = None, workspace_id: UUID | None = None,
               tag: str | None = None, limit: int = Query(50, le=200), cursor: str | None = None):
     where, params = ["org_id=:org"], {"org": str(p.org_id), "limit": limit + 1}

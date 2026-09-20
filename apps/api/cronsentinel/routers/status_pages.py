@@ -7,6 +7,7 @@ from sqlalchemy import text
 
 from ..auth import Principal, audit, current_principal, require_role
 from ..db import system_session, tenant_session
+from ..schemas import StatusPageOut
 
 router = APIRouter(prefix="/api/v1/status-pages", tags=["status-pages"])
 public = APIRouter(prefix="/public", tags=["public"])
@@ -19,7 +20,7 @@ class PageIn(BaseModel):
     job_ids: list[UUID] = []
 
 
-@router.get("")
+@router.get("", response_model=list[StatusPageOut])
 def list_pages(p: Principal = Depends(current_principal)):
     with tenant_session(p.org_id) as s:
         return [dict(r._mapping) for r in s.execute(text("SELECT id, slug, title, visibility, job_ids FROM status_pages")).all()]

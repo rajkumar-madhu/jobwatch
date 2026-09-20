@@ -394,3 +394,36 @@ The suite was mutation-checked: adding a field to the mock makes it fail, so it 
 `/clusters`, `/topology`, `/agents`, `/copilot/*`, `/billing` — seeding a real row needs a
 cluster, an agent or an LLM that this harness does not have. The mock's shape for those is
 **unchecked**, and listed in the test.
+
+## R14 — response models, and a real schema contract
+
+R13 found that OpenAPI could not serve as a contract: 3 of 77 endpoints declared a
+`response_model`. R14 adds models to the dashboard read endpoints and upgrades the contract test
+from a key diff to real schema validation (358 backend tests).
+
+Modelled endpoints went 3 → 11: `JobPage`, `IncidentOut`, `ChannelOut`, `AlertRuleOut`,
+`StatusPageOut`, `WorkspaceOut`, `OverviewOut`, `DependencyGraph` (+ node/edge/metric models) in
+`cronsentinel/schemas.py`. The models describe what the routers already returned — the full suite
+passed unchanged after wiring them, which is the evidence that they are accurate rather than
+aspirational.
+
+`tests/test_mock_schema_contract.py` (no DB) validates the mock's responses against those schemas
+with jsonschema, so field **types** are now checked, not just key names.
+
+### Drift this found
+The mock omitted `org_id` on incidents and alert rules, and `created_at` on channels, rules and
+workspaces — fields the real API always returns. The frontend was therefore developed against a
+shape production never sends. Fixed in `tools/ui-review/mock_api.py`.
+
+### Behaviour change worth knowing
+With a `response_model`, a router returning a row that is missing a required field now raises a
+500 at serialisation instead of passing the partial object through. That is the intent, but it is
+a real change in failure mode for the eight endpoints above.
+
+### Remaining gaps
+`UNMODELLED` in the test lists the read endpoints still returning bare dicts — `/agents`,
+`/clusters`, `/topology`, `/logs/search`, `/analytics/series`, `/analytics/jobs`. Their mock shape
+is **unvalidated**. The test asserts the list in both directions: a new bare-dict read endpoint
+must be acknowledged, and adding a model must remove its entry, so coverage cannot quietly stay
+flat. Note `/clusters`, `/topology` and `/agents` are also the endpoints R13 could not seed — they
+are the least-tested surface in the product.

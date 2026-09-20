@@ -9,6 +9,10 @@ app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:3000"], allo
 now = datetime.now(timezone.utc)
 iso = lambda d: d.isoformat()
 random.seed(7)
+# The real API always returns org_id/created_at on these rows; the mock must too, or the
+# frontend is developed against a shape production never sends (caught by R14 schema contract).
+ORG = str(uuid.uuid5(uuid.NAMESPACE_DNS, "jobwatch-demo-org"))
+CREATED = iso(now - timedelta(days=90))
 J = [("nightly-database-backup","0 2 * * *","At 02:00 AM","healthy",["prod","db","backup"],91,900),("billing-reconciliation","0 */6 * * *","Every 6 hours","healthy",["prod","billing"],98,300),
      ("market-data-import","*/15 * * * *","Every 15 minutes","recovered",["prod","data"],74,60),("customer-report-generator","30 6 * * *","At 06:30 AM","failed",["prod","reports"],61,600),
      ("log-cleanup","0 4 * * *","At 04:00 AM","healthy",["prod","maintenance"],99,120),("mongodb-backup","0 3 * * *","At 03:00 AM","missed",["prod","db","backup"],83,700),
@@ -30,9 +34,9 @@ def execs(j, n=30):
     return list(reversed(out))
 EX = {j["id"]: execs(j) for j in JOBS}
 byid = {j["id"]: j for j in JOBS}
-INC = [{"id": "inc1", "severity": "high", "status": "open", "title": "3 related jobs failing", "started_at": iso(now - timedelta(hours=1, minutes=12)), "acknowledged_at": None, "resolved_at": None, "affected_job_ids": [JOBS[3]["id"], JOBS[5]["id"], JOBS[0]["id"]], "job_names": ["customer-report-generator", "mongodb-backup", "nightly-database-backup"], "root_cause": None, "resolution": None, "last_notified_at": iso(now - timedelta(minutes=58)),
+INC = [{"org_id": ORG, "id": "inc1", "severity": "high", "status": "open", "title": "3 related jobs failing", "started_at": iso(now - timedelta(hours=1, minutes=12)), "acknowledged_at": None, "resolved_at": None, "affected_job_ids": [JOBS[3]["id"], JOBS[5]["id"], JOBS[0]["id"]], "job_names": ["customer-report-generator", "mongodb-backup", "nightly-database-backup"], "root_cause": None, "resolution": None, "last_notified_at": iso(now - timedelta(minutes=58)),
         "correlation_signals": [{"host": "prod-db-01", "job_id": JOBS[3]["id"], "infra": ["io_wait 188ms"]}, {"host": "prod-db-01", "job_id": JOBS[5]["id"]}, {"host": "prod-db-01", "job_id": JOBS[0]["id"], "infra": ["io_wait 188ms", "disk 91%"]}]},
-       {"id": "inc2", "severity": "medium", "status": "resolved", "title": "market-data-import is failed", "started_at": iso(now - timedelta(days=1, hours=3)), "acknowledged_at": iso(now - timedelta(days=1, hours=2)), "resolved_at": iso(now - timedelta(days=1)), "affected_job_ids": [JOBS[2]["id"]], "job_names": ["market-data-import"], "root_cause": "Upstream feed returned 502 for 40 minutes", "resolution": "auto: job recovered"}]
+       {"org_id": ORG, "id": "inc2", "severity": "medium", "status": "resolved", "title": "market-data-import is failed", "started_at": iso(now - timedelta(days=1, hours=3)), "acknowledged_at": iso(now - timedelta(days=1, hours=2)), "resolved_at": iso(now - timedelta(days=1)), "affected_job_ids": [JOBS[2]["id"]], "job_names": ["market-data-import"], "root_cause": "Upstream feed returned 502 for 40 minutes", "resolution": "auto: job recovered"}]
 
 @app.get("/api/v1/analytics/overview")
 def ov(): return {"total_jobs": 8, "by_status": {"healthy": 3, "failed": 1, "missed": 1, "late": 1, "running": 1, "recovered": 1}, "executions_today": 146, "success_rate_today": 94.52, "top_slowest_7d": [{"name": "nightly-database-backup", "p95_ms": 3120000}, {"name": "mongodb-backup", "p95_ms": 712000}, {"name": "customer-report-generator", "p95_ms": 640000}], "top_failing_7d": [{"name": "customer-report-generator", "failures": 3}, {"name": "market-data-import", "failures": 2}], "mttd_min": 1.4, "mttr_min": 42.5}
@@ -80,9 +84,9 @@ def logs(q: str | None = None, **kw):
 @app.get("/api/v1/agents")
 def agents(): return [{"id": "a1", "kind": "linux", "name": "prod-db-01", "host_id": "4c9e1f…", "version": "0.1.0", "status": "active", "last_seen_at": iso(now - timedelta(seconds=20)), "skew_ms": 38, "revoked_at": None, "jobs": 3}, {"id": "a2", "kind": "linux", "name": "backup-01", "host_id": "9a02bb…", "version": "0.1.0", "status": "active", "last_seen_at": iso(now - timedelta(minutes=9)), "skew_ms": 7200, "revoked_at": None, "jobs": 2}, {"id": "a3", "kind": "k8s", "name": "production", "host_id": "k8s:production", "version": "0.1.0", "status": "active", "last_seen_at": iso(now - timedelta(seconds=40)), "skew_ms": -12, "revoked_at": None, "jobs": 6}]
 @app.get("/api/v1/alerts/channels")
-def ch(): return [{"id": "c1", "kind": "slack", "name": "ops-alerts", "rate_per_min": 30, "enabled": True}, {"id": "c2", "kind": "email", "name": "oncall", "rate_per_min": 30, "enabled": True}]
+def ch(): return [{"id": "c1", "kind": "slack", "name": "ops-alerts", "rate_per_min": 30, "enabled": True, "created_at": CREATED}, {"id": "c2", "kind": "email", "name": "oncall", "rate_per_min": 30, "enabled": True, "created_at": CREATED}]
 @app.get("/api/v1/alerts/rules")
-def rules(): return [{"id": "r1", "name": "Prod failures → Slack", "condition": "failed", "scope": {"tags": ["prod"]}, "severity": "high", "enabled": True}, {"id": "r2", "name": "Missed backups page oncall", "condition": "missed", "scope": {"tags": ["backup"]}, "severity": "critical", "enabled": True}, {"id": "r3", "name": "Recovery notices", "condition": "recovered", "scope": {}, "severity": "low", "enabled": False}]
+def rules(): return [{"org_id": ORG, "created_at": CREATED, "id": "r1", "name": "Prod failures → Slack", "condition": "failed", "scope": {"tags": ["prod"]}, "severity": "high", "enabled": True}, {"org_id": ORG, "created_at": CREATED, "id": "r2", "name": "Missed backups page oncall", "condition": "missed", "scope": {"tags": ["backup"]}, "severity": "critical", "enabled": True}, {"org_id": ORG, "created_at": CREATED, "id": "r3", "name": "Recovery notices", "condition": "recovered", "scope": {}, "severity": "low", "enabled": False}]
 @app.get("/api/v1/alerts/ledger")
 def ledger(limit: int = 30): return [{"id": k, "incident_id": "inc1", "channel_id": "c1", "kind": "slack", "name": "ops-alerts", "dedup_key": "r1:cust…:failed", "sent_at": iso(now - timedelta(minutes=58 + k * 30)), "status": ["sent", "sent", "rate_limited", "failed"][k % 4], "error": "502 from hooks.slack.com" if k % 4 == 3 else None} for k in range(6)]
 @app.get("/api/v1/clusters")
@@ -117,7 +121,7 @@ def bill(): return {"subscription": {"plan": "team", "status": "trialing", "tria
 @app.get("/public/status/{slug}")
 def st(slug: str): return {"title": "Acme scheduled jobs", "overall": "degraded", "jobs": [{"name": j["name"], "status": j["status"], "last_run_at": j["last_run_at"], "uptime_90d": round(99.9 - (100 - j["reliability_score"]) / 4, 2), "recent": [e["status"] for e in EX[j["id"]]][:30], "show_duration": False} for j in JOBS[:5]], "incidents": [{"title": INC[1]["title"], "severity": "medium", "status": "resolved", "started_at": INC[1]["started_at"], "resolved_at": INC[1]["resolved_at"]}], "maintenance": [{"starts_at": iso(now + timedelta(days=2)), "ends_at": iso(now + timedelta(days=2, hours=2))}]}
 @app.get("/api/v1/workspaces")
-def ws(): return [{"id": "ws", "name": "default"}]
+def ws(): return [{"id": "ws", "name": "default", "created_at": CREATED}]
 @app.get("/api/v1/status-pages")
 def sp(): return [{"id": "p1", "slug": "demo", "title": "Acme scheduled jobs", "visibility": "public", "job_ids": [j["id"] for j in JOBS[:5]]}]
 @app.get("/auth/session")

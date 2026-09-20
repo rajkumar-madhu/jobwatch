@@ -6,6 +6,7 @@ from sqlalchemy import text
 
 from ..auth import Principal, audit, current_principal, require_role
 from ..db import tenant_session
+from ..schemas import IncidentOut
 
 router = APIRouter(prefix="/api/v1/incidents", tags=["incidents"])
 
@@ -19,7 +20,7 @@ class ResolveIn(BaseModel):
     root_cause: str | None = None
 
 
-@router.get("")
+@router.get("", response_model=list[IncidentOut])
 def list_incidents(p: Principal = Depends(current_principal), status: str | None = None, limit: int = 50):
     q = "SELECT i.*, (SELECT array_agg(name) FROM jobs WHERE id = ANY(i.affected_job_ids)) AS job_names FROM incidents i"
     params = {"l": min(limit, 200)}

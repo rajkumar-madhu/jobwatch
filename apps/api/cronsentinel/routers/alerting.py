@@ -9,6 +9,7 @@ from ..alerting.rules import CONDITIONS
 from ..auth import Principal, audit, current_principal, require_role
 from ..crypto import encrypt_json
 from ..db import tenant_session
+from ..schemas import AlertRuleOut, ChannelOut
 
 router = APIRouter(prefix="/api/v1/alerts", tags=["alerting"])
 
@@ -42,7 +43,7 @@ class MaintenanceIn(BaseModel):
     rrule: str | None = None
 
 
-@router.get("/channels")
+@router.get("/channels", response_model=list[ChannelOut])
 def list_channels(p: Principal = Depends(current_principal)):
     with tenant_session(p.org_id) as s:
         return [dict(r._mapping) for r in s.execute(text("SELECT id, kind, name, rate_per_min, enabled, created_at FROM notification_channels ORDER BY name")).all()]
@@ -79,7 +80,7 @@ def delete_channel(channel_id: UUID, request: Request, p: Principal = Depends(re
         audit(s, p, "channel.delete", "notification_channel", str(channel_id), ip=request.client.host)
 
 
-@router.get("/rules")
+@router.get("/rules", response_model=list[AlertRuleOut])
 def list_rules(p: Principal = Depends(current_principal)):
     with tenant_session(p.org_id) as s:
         return [dict(r._mapping) for r in s.execute(text("SELECT * FROM alert_rules ORDER BY created_at")).all()]

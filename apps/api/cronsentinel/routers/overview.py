@@ -3,11 +3,12 @@ from sqlalchemy import text
 
 from ..auth import Principal, current_principal
 from ..db import tenant_session
+from ..schemas import OverviewOut
 
 router = APIRouter(prefix="/api/v1/analytics", tags=["analytics"])
 
 
-@router.get("/overview")
+@router.get("/overview", response_model=OverviewOut)
 def overview(p: Principal = Depends(current_principal)):
     with tenant_session(p.org_id) as s:
         counts = dict(s.execute(text("SELECT status::text, count(*) FROM jobs GROUP BY status")).all())

@@ -8,6 +8,7 @@ from sqlalchemy import text
 from ..alerting.correlation import downstream_impact
 from ..auth import Principal, audit, current_principal, require_role
 from ..db import tenant_session
+from ..schemas import DependencyGraph
 
 router = APIRouter(prefix="/api/v1", tags=["topology"])
 
@@ -17,7 +18,7 @@ class DepIn(BaseModel):
     depends_on_job_id: UUID
 
 
-@router.get("/dependencies")
+@router.get("/dependencies", response_model=DependencyGraph)
 def dependencies(p: Principal = Depends(current_principal)):
     with tenant_session(p.org_id) as s:
         edges = [dict(r._mapping) for r in s.execute(text("SELECT job_id, depends_on_job_id FROM job_dependencies")).all()]
