@@ -360,3 +360,37 @@ Playwright report on failure.
 - `nats` outbound destination kind still raises not-implemented.
 - e2e runs against the mock API, not the real backend: contract drift between
   `tools/ui-review/mock_api.py` and the actual routers is still possible and unchecked.
+
+## R13 — mock/real contract
+
+R12's e2e suite runs the frontend against `tools/ui-review/mock_api.py`. Green there means the
+frontend works *against the mock*; if the mock drifts from the real routers the suite stays green
+while production breaks. R13 pins the two together (22 tests, 349 backend total).
+
+- `tests/test_mock_contract.py` (no DB) — every mock route exists in the real route table, with
+  path-param names normalised so `{jid}` vs `{job_id}` is not treated as drift, and the endpoints
+  the dashboard calls all have mock coverage.
+- `tests/integration/test_mock_shape_contract.py` — calls both APIs for the same endpoint against
+  seeded data and diffs the JSON key structure. Fields the mock invents fail; container kind
+  (bare list vs `{"items": [...]}`) is checked separately because both render as "no data" in the
+  UI rather than as an error.
+
+### Findings
+- **OpenAPI is not usable as a contract here.** Only 3 of 77 endpoints declare a `response_model`;
+  the rest return bare dicts and serialise as `{"type": "object", "additionalProperties": true}`.
+  Schema validation against the real spec would assert nothing. **Open:** adding response models
+  to the read endpoints would make this test far stronger and is worth doing incrementally.
+- The mock 500s on any job id it does not know, so path params must come from the mock itself.
+
+### Traps this test had to avoid (both produced false drift on the first run)
+- An empty real collection has no item paths, so every mock item field looks invented. Each
+  compared endpoint now seeds a populated row, and a still-empty real container **skips with a
+  reason** rather than passing silently.
+- Data-keyed maps (`analytics.by_status`) are values, not fields, and are excluded by name.
+
+The suite was mutation-checked: adding a field to the mock makes it fail, so it is not vacuous.
+
+### Not covered
+`/clusters`, `/topology`, `/agents`, `/copilot/*`, `/billing` — seeding a real row needs a
+cluster, an agent or an LLM that this harness does not have. The mock's shape for those is
+**unchecked**, and listed in the test.
