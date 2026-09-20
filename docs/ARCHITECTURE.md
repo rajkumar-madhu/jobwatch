@@ -107,3 +107,38 @@ Both producers emit: `org_id, job_id, execution_id?, prev_status, new_status, pr
 new_state, unknown_reason, consecutive_failures, occurred_at`. The rule engine reads `org_id` and
 the state fields; the outbound exporter maps it to `job.state_changed`. Before R6 the processor
 omitted `org_id` entirely, so every status change from an execution crashed the rule engine.
+
+## R11 — data lifecycle
+
+### What FKs cover, and what they cannot
+Most child tables cascade from `organizations` / `jobs`. Three groups do not:
+
+1. **Partitioned, high-volume tables** — `executions`, `expected_runs`, `execution_events`,
+   `execution_logs`, `host_metrics`. They carry `org_id` but no FK. A cascade here would turn
+   every job delete into an unbounded delete across partitions, and it fights the
+   partition-drop retention path.
+2. **Tables that were simply never wired** — `audit_logs`, `copilot_sessions`, `incident_events`,
+   `k8s_events`, `notification_ledger`, `signal_deliveries`.
+3. **`uuid[]` references**, where no FK is possible — `status_pages.job_ids`,
+   `incidents.affected_job_ids`, `alert_rules.channel_ids`, `signal_destinations.workspace_ids`.
+
+### The teardown paths (migration 0009)
+- `purge_job(uuid)` — called by `DELETE /api/v1/jobs/{id}` **in the same transaction** as the
+  delete. Before this, deleting a job left its slots behind (78 in the test fixture) and the
+  reconciler carried on settling them for a job that no longer existed.
+- `purge_org(uuid)` — tenant offboarding, exposed as `python -m cronsentinel.cli purge-org
+  --org-id … --yes`. It prints row counts and refuses without `--yes`.
+- Trigger `jobs_prune_status_pages` — removes a deleted job from every `status_pages.job_ids`
+  array whatever path deleted it, so a public page cannot render a phantom entry.
+
+### Deliberately kept
+`incidents.affected_job_ids` is **not** pruned: an incident is a historical record and must keep
+naming the job it was about. The incident detail view and the public status page are both tested
+to tolerate an id that no longer resolves.
+
+### Open
+- `purge_org` is a manual operation; there is no self-service org deletion endpoint, and no
+  export-before-delete step for GDPR-style requests.
+- Retention still deletes rows rather than dropping partitions (unchanged since R3).
+- Revoking an agent leaves its jobs in place and UNKNOWN/agent_offline, which is correct, but
+  nothing ever cleans up jobs whose agent is never coming back.

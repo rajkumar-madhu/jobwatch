@@ -94,6 +94,12 @@ def update_job(job_id: UUID, body: JobUpdate, request: Request, p: Principal = D
 @router.delete("/{job_id}", status_code=204)
 def delete_job(job_id: UUID, request: Request, p: Principal = Depends(require_role("devops"))):
     with tenant_session(p.org_id) as s:
+        # purge_job first: executions/expected_runs/logs carry org_id but no FK to jobs (they are
+        # partitioned), so a plain DELETE left orphans the reconciler would keep settling. Same
+        # transaction, so a failed purge does not half-delete the job.
+        if not s.execute(text("SELECT 1 FROM jobs WHERE id=:id"), {"id": str(job_id)}).first():
+            raise HTTPException(404)
+        s.execute(text("SELECT purge_job(CAST(:id AS uuid))"), {"id": str(job_id)})
         n = s.execute(text("DELETE FROM jobs WHERE id=:id"), {"id": str(job_id)}).rowcount
         if not n: raise HTTPException(404)
         audit(s, p, "job.delete", "job", str(job_id), ip=request.client.host)

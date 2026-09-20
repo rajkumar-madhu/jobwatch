@@ -306,3 +306,26 @@ against Postgres). Fine in CI; use `-k` locally.
 - A live Keycloak server and a live Stripe account.
 - `nats` outbound destination kind still raises not-implemented.
 - Handler-level business rules (the matrix is authorisation breadth, not logic depth).
+
+## R11 — lifecycle and cascade
+
+`tests/integration/test_lifecycle_cascade.py` (8) covers job delete, agent revoke and org purge.
+Migration 0009 adds `purge_job()`, `purge_org()` and a status-page prune trigger;
+`DELETE /api/v1/jobs/{id}` now calls `purge_job` in the same transaction, and
+`python -m cronsentinel.cli purge-org --org-id … --yes` offboards a tenant. **327 tests green.**
+
+### Found
+- Deleting a job left its `expected_runs` behind (78 rows in the fixture) plus its executions and
+  execution_events — none of those tables has a FK to `jobs`. The reconciler would keep settling
+  slots for a job that no longer exists.
+- A deleted job stayed in `status_pages.job_ids`, so a public page kept listing it.
+- There was no way to fully remove a tenant's data: eleven tables carry `org_id` with no FK to
+  `organizations`, so `DELETE FROM organizations` silently retained all of it.
+- Verified as already correct: the public status page and the incident detail view both survive a
+  deleted job; revoking an agent leaves its jobs alone and marks them UNKNOWN/agent_offline.
+
+### Still not verified
+- Go agents (R1, on a real host); K8s agent heartbeat_interval_s.
+- A live Keycloak server and a live Stripe account.
+- `nats` outbound destination kind still raises not-implemented.
+- No self-service org deletion, and no export-before-delete for GDPR-style requests.
