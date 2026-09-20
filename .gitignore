@@ -17,3 +17,6 @@ __pycache__/
 /var/
 buffer.jsonl*
 agent.json
+# playwright
+apps/web/playwright-report/
+apps/web/test-results/

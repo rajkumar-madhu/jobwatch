@@ -329,3 +329,34 @@ Migration 0009 adds `purge_job()`, `purge_org()` and a status-page prune trigger
 - A live Keycloak server and a live Stripe account.
 - `nats` outbound destination kind still raises not-implemented.
 - No self-service org deletion, and no export-before-delete for GDPR-style requests.
+
+## R12 — web tests
+
+The frontend had **zero** tests against 327 on the backend. Two layers added, both DB-free:
+
+- **vitest** (`apps/web/tests/unit`, 20 tests) — `lib/format` and `lib/api`. The CSRF flow written
+  in R8 had never executed: it is now pinned that the token is fetched before the first cookie
+  write, reused afterwards, absent on reads and on API-key requests, refreshed exactly once on a
+  403, and never persisted to localStorage.
+- **Playwright** (`apps/web/tests/e2e`, 22 tests x desktop + Pixel 7) — all 14 app pages plus the
+  landing and public status pages render against `tools/ui-review/mock_api.py` with no ErrorBox, no
+  page error and no failing request; sidebar/drawer navigation; and the failure states the mock
+  cannot produce (500 → error, empty list → empty state, 401 → sign in, slow → skeleton), driven by
+  `page.route` interception.
+
+CI now runs `npm test`, the build, then the e2e suite against the mock API, uploading the
+Playwright report on failure.
+
+### Notes from the run
+- Playwright must match the browser build available to the runner; pinned to 1.56.0 here.
+- The app loads IBM Plex from `fonts.googleapis.com`, which is blocked in sandboxes. Pages render
+  correctly on the fallback stack, so the e2e suite excludes that host by name rather than
+  ignoring all failed requests — a real failing API call still fails the test. **Open:** consider
+  self-hosting the font so the app has no hard remote dependency at render time.
+
+### Still not verified
+- Go agents (R1, on a real host); K8s agent heartbeat_interval_s.
+- A live Keycloak server and a live Stripe account.
+- `nats` outbound destination kind still raises not-implemented.
+- e2e runs against the mock API, not the real backend: contract drift between
+  `tools/ui-review/mock_api.py` and the actual routers is still possible and unchecked.
