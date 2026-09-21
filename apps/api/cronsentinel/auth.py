@@ -5,6 +5,9 @@ from dataclasses import dataclass
 from uuid import UUID
 
 import httpx
+import hashlib
+import hmac
+
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 from fastapi import Depends, Header, HTTPException, Request
@@ -31,15 +34,40 @@ class Principal:
         return ROLE_ORDER.index(self.role) >= ROLE_ORDER.index(role)
 
 
+# R21: machine secrets (API keys, agent keys) are hashed with SHA-256, not argon2.
+#
+# Argon2 exists to make low-entropy *human* passwords expensive to guess. These secrets are
+# server-generated with secrets.token_urlsafe(32) — 256 bits — so brute force is infeasible
+# whatever the hash, and the ~180 ms argon2 verify bought nothing while running on every request:
+# every API-key call, and every agent heartbeat (agent_principal cached the hash, not the result).
+# That capped a core at ~5 agent requests/s — the 10k-job load mix needs ~36/s — and let anyone
+# who knew a key's (non-secret) prefix burn 180 ms of CPU per request, before the rate limiter ran.
+#
+# No pepper on purpose: a peppered hash would tie every key to SECRET_ENCRYPTION_KEY, so rotating
+# the root secret would silently revoke every API and agent key.
+#
+# NEVER use these for passwords. There are none today (users authenticate through Keycloak); if a
+# password ever appears, it needs argon2, which is why _ph stays for the legacy path below.
+_FAST = "sha256$"
+
+
 def hash_secret(raw: str) -> str:
-    return _ph.hash(raw)
+    return _FAST + hashlib.sha256(raw.encode()).hexdigest()
 
 
 def verify_secret(raw: str, hashed: str) -> bool:
-    try:
+    if hashed.startswith(_FAST):
+        return hmac.compare_digest(hashed, hash_secret(raw))
+    try:  # pre-R21 argon2 hash; callers upgrade it via needs_rehash()
         return _ph.verify(hashed, raw)
     except VerifyMismatchError:
         return False
+    except Exception:
+        return False
+
+
+def needs_rehash(hashed: str) -> bool:
+    return not hashed.startswith(_FAST)
 
 
 def generate_api_key() -> tuple[str, str]:
@@ -75,7 +103,9 @@ def _principal_from_api_key(raw: str) -> Principal:
             "SELECT id, org_id, key_hash, role FROM api_keys WHERE prefix=:p AND revoked_at IS NULL"), {"p": prefix}).first()
         if not row or not verify_secret(raw, row.key_hash):
             raise HTTPException(401, "invalid api key")
-        s.execute(text("UPDATE api_keys SET last_used_at=now() WHERE id=:id"), {"id": row.id})
+        # Upgrade a pre-R21 argon2 hash in place on first successful use.
+        new_hash = hash_secret(raw) if needs_rehash(row.key_hash) else None
+        s.execute(text("UPDATE api_keys SET last_used_at=now(), key_hash=COALESCE(:h, key_hash) WHERE id=:id"), {"id": row.id, "h": new_hash})
     return Principal(org_id=row.org_id, role=row.role, api_key_id=row.id)
 
 

@@ -625,3 +625,18 @@ Closes two R19 open findings; numbers in `docs/LOADTEST.md`.
 - Migration 0010 adds an expression index for R17's timeline sort, after measuring it: 18.8 ms →
   9.0 ms per recompute at a week of every-minute history. Building it locks writes on
   `executions` briefly; see the migration docstring for the per-partition route on large tables.
+
+## R21 — RLS index use, machine-secret hashing
+
+Started as "cache the slow analytics endpoints"; measuring first found two platform-wide costs
+instead, both fixed, no cache added. Details and numbers in `docs/LOADTEST.md`, role and hashing
+design in `docs/SECURITY.md`. 449 backend tests (28 s, was ~190 s) + 6 full-chain.
+
+- Migration 0011: `jobwatch_system` role for system sessions; tenant policies lose their
+  `OR app_bypass()` arm, so `org_id` indexes are used. `db.system_session()` now does
+  `SET LOCAL ROLE jobwatch_system` instead of setting a GUC.
+- API and agent keys hashed with SHA-256; argon2 hashes upgraded on first use.
+
+**Deploy notes:** 0011 needs PostgreSQL 16 and a migration user able to create roles (0007 already
+required this). Existing keys keep working. Do not grant `jobwatch_system` to anything with
+INHERIT TRUE.

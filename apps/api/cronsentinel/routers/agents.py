@@ -16,6 +16,7 @@ from ..auth import (
     current_principal,
     hash_secret,
     require_role,
+    needs_rehash,
     verify_secret,
 )
 from ..config import settings
@@ -115,6 +116,11 @@ def agent_principal(request: Request, x_agent_key: str = Header(...), x_agent_id
         h, org = row.key_hash, str(row.org_id)
         _r.setex(f"agentkey:{x_agent_id}", 300, f"{h}|{org}")
     if not verify_secret(x_agent_key, h): raise HTTPException(401, "invalid agent key")
+    if needs_rehash(h):  # R21: upgrade a pre-R21 argon2 hash once; every later request is a SHA-256 compare
+        new_hash = hash_secret(x_agent_key)
+        with system_session() as s:
+            s.execute(text("UPDATE agents SET key_hash=:h WHERE id=:id AND revoked_at IS NULL"), {"h": new_hash, "id": x_agent_id})
+        _r.setex(f"agentkey:{x_agent_id}", 300, f"{new_hash}|{org}")
     ratelimit.check(f"agent:{x_agent_id}", settings.ingest_rate_per_min, request)
     return {"agent_id": x_agent_id, "org_id": org}
 

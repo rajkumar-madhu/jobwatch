@@ -32,7 +32,10 @@ def system_session():
     """Cross-tenant session for workers. Use sparingly; every query must still filter org_id explicitly."""
     s: Session = SessionLocal()
     try:
-        s.execute(text("SET LOCAL app.bypass_rls = 'on'"))
+        # R21: a role switch, not a GUC. The old `app.bypass_rls` GUC was checked inside every tenant
+        # policy as `... OR app_bypass()`, which stopped Postgres using org_id indexes for *tenant*
+        # queries. jobwatch_system has its own policy; see migration 0011.
+        s.execute(text("SET LOCAL ROLE jobwatch_system"))
         yield s
         s.commit()
     except Exception:

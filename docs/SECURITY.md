@@ -151,3 +151,27 @@ Known limits: the guard uses `httpcore.ConnectionPool._network_backend`, a priva
 dependency upgrade stops honouring it, rather than the guard silently becoming a no-op. NAT64
 (`64:ff9b::/96`) embeddings are not unwrapped. Telegram is a fixed host and not routed through the
 guard. Email uses the operator's SMTP settings, not tenant input.
+
+
+## Row-level security roles (R21)
+
+- `jobwatch_app` — the login role. Tenant sessions set `app.org_id`; the only policy that applies
+  is `org_id = app_org_id()`.
+- `jobwatch_system` — NOLOGIN. System sessions (workers, cross-tenant lookups) `SET LOCAL ROLE
+  jobwatch_system`, which has `USING (true)` on every tenant table.
+- `jobwatch_app` is a member of `jobwatch_system` **WITH INHERIT FALSE, SET TRUE**. A policy `TO`
+  a role applies to its members; with INHERIT TRUE, the `true` policy would apply to every tenant
+  query. `tests/integration/test_rls_system_role.py` asserts this, and was mutation-checked:
+  flipping to INHERIT TRUE made tenants read and write other tenants' rows, and 6 tests failed.
+- `SET LOCAL ROLE` ends with the transaction, so pooled connections return to `jobwatch_app`
+  (tested).
+- Requires PostgreSQL 16.
+
+## Machine secrets (R21)
+
+API keys and agent keys are 256-bit random tokens hashed with SHA-256 (`sha256$…`). Argon2 is
+deliberately not used: it protects low-entropy passwords, and at ~180 ms per verify on every
+request it throttled ingest and gave anyone with a key prefix a cheap CPU-exhaustion lever.
+Hashes are unpeppered so rotating `SECRET_ENCRYPTION_KEY` does not revoke every key. Pre-R21 argon2
+hashes still verify and are rewritten on first successful use. There are no user passwords
+(Keycloak handles users); if one is ever introduced it must use argon2.

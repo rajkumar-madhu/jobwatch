@@ -68,11 +68,44 @@ Events are published only after each batch commits, so a state that could still 
 never announced. The index cannot be built `CONCURRENTLY` on a partitioned table; migration 0010's
 docstring has the per-partition procedure for large production tables.
 
+## R21 — the two platform-wide costs behind "slow analytics"
+
+Investigating the analytics numbers before caching them found that most of the latency was not in
+the analytics queries at all.
+
+**1. RLS policies prevented index use for every tenant query.** Each tenant table had two
+permissive policies, ORed by Postgres: `org_id = app_org_id() OR app_bypass()`. The column-less
+second arm stops the planner using the `org_id` index, so tenant queries scanned *all tenants'*
+rows and filtered — a 7-day executions count for one tenant read 386k rows and discarded 326k
+(247 ms). Cost grew with the whole platform's data, not the tenant's. Migration 0011 moves system
+sessions to a `jobwatch_system` role with its own policy; the app role now sees only
+`org_id = app_org_id()`, which is an index condition (same query: 5.6 ms).
+
+**2. Argon2 on every machine-authenticated request.** API keys and agent keys were verified with
+argon2 (~181 ms on this box) on every request — including every agent heartbeat, where the Redis
+cache held the hash but not the verification. That put a ~180 ms floor under every API-key request,
+capped a core at ~5 agent requests/s (the 10k mix needs ~36/s), and let anyone who knew a key's
+public prefix burn 180 ms of CPU per request ahead of the rate limiter. These are 256-bit
+server-generated tokens; they now use SHA-256, with legacy argon2 hashes accepted and upgraded in
+place on first use.
+
+| Endpoint (2k-job tenant) | R19 p50 | R21 p50 |
+|---|---|---|
+| `/jobs?limit=50` | 179 ms | 19.6 ms |
+| `/topology` | 199 ms | 18.2 ms |
+| `/incidents` | ~188 ms | 5.2 ms |
+| `/analytics/jobs` | 635 ms | 125 ms |
+| `/analytics/overview` | 665 ms | 193 ms |
+| `recompute_state` | 3.9 ms | 2.4 ms |
+| processor, single worker | 148 ev/s | 194 ev/s |
+
+No caching was added: at these numbers it is not yet needed, and caching the slow version would
+have hidden both problems. The integration suite went from ~190 s to 28 s — argon2 was most of it.
+
 ## Open findings (not fixed)
 
-- **Analytics reads are 0.6–0.9 s for a 2k-job tenant** and the dashboard polls every 15 s. With
-  many concurrent users that is significant DB load. Candidates: short-TTL caching or a rollup
-  table maintained by a worker.
+- **`/analytics/overview` shows one ~4 s request out of 20** in two separate runs (p95 = max), apparently
+  the first after seeding. Not diagnosed — cold buffers or first-plan cost are guesses, not findings.
 - **Backfill semantics after a generator outage.** A job with no slots gets up to 2 days of past
   slots, which the reconciler then marks missed — a missed-alert storm after a long outage, even
   for runs that did happen but were never attached to a slot. R3 behaviour; needs a decision
