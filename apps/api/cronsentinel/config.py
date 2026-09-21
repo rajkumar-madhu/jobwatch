@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     # R16 data boundary: an endpoint outside the private network is refused unless this is set, and
     # when it is set, hostnames/pods/nodes/IPs are pseudonymised before leaving. See copilot/egress.py.
     copilot_allow_external: bool = False
+    # R18 SSRF guard: false = tenant webhooks may only reach public addresses (multi-tenant SaaS).
+    # Set true for single-tenant self-hosted installs that post to internal services. netguard.py.
+    outbound_allow_private: bool = False
     copilot_internal_suffixes: str = ".svc,.cluster.local,.internal,.local,.lan"
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""

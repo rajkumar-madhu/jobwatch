@@ -118,3 +118,36 @@ Both are now `UUID`, giving a 422. (`execution_id` stays `str` — those are age
   are right.
 - `PATCH /api/v1/jobs/{id}` cannot change a job's `name` — not a bug, but there is no rename API.
 - Role changes do not invalidate an existing CSRF token or session until TTL.
+
+
+## Outbound requests to tenant-supplied URLs (R18)
+
+Webhook channels, Slack/Teams/Discord incoming-webhook URLs and signal destinations are fetched from
+inside the cluster. Every such request goes through `cronsentinel/netguard.py`:
+
+- **Connect-time address check.** The guard resolves the name itself, drops any non-public address,
+  and connects to a validated address — so a name that resolves publicly when saved and to
+  `169.254.169.254` when sent (DNS rebinding) is still blocked. TLS verifies against the URL's
+  hostname, not the IP (tested with a local CA: a wrong name on the same IP fails verification).
+- **Blocked ranges** (SaaS mode): private, loopback, link-local (cloud metadata), multicast,
+  reserved, unspecified, CGNAT `100.64.0.0/10`, and IPv4-mapped IPv6 forms of all of these.
+- **No redirects, no proxy env.** A public URL answering `302 → 169.254.169.254` is not followed;
+  `HTTP(S)_PROXY` is ignored so the proxy is not validated in place of the target.
+- **Forbidden headers.** Tenants cannot set `Host`, framing headers, or the headers cloud metadata
+  services require (`Metadata-Flavor`, `Metadata`, `X-aws-ec2-metadata-token*`) — the difference
+  between a blind SSRF and a credential leak. Checked at save time *and* send time, because rows
+  saved before R18 were never validated.
+- **No oracle.** "Send test", the delivery log, `disabled_reason` and the notification ledger
+  store a category (`destination not allowed`, `timed out`, `connection failed`,
+  `HTTP 503 from destination`) — never the raw exception, which named internal addresses and told
+  refused from timeout apart, i.e. a port scanner run from the API pod.
+
+`OUTBOUND_ALLOW_PRIVATE` switches off the address check only (scheme, redirect and header rules
+stay). **Helm default `false`** (multi-tenant). **Compose default `true`** (single-tenant
+self-hosted, where internal webhooks are normal). A multi-tenant deploy must never set it true.
+
+Known limits: the guard uses `httpcore.ConnectionPool._network_backend`, a private attribute
+(httpcore 1.0.x) — `tests/test_netguard.py::test_guard_hook_is_actually_installed` fails if a
+dependency upgrade stops honouring it, rather than the guard silently becoming a no-op. NAT64
+(`64:ff9b::/96`) embeddings are not unwrapped. Telegram is a fixed host and not routed through the
+guard. Email uses the operator's SMTP settings, not tenant input.

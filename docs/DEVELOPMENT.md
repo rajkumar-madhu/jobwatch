@@ -577,3 +577,31 @@ There is no destination check on webhook channels or signal destinations. A tena
 to it from inside the cluster. For a multi-tenant SaaS this must be blocked; for a self-hosted
 single-tenant deploy, internal webhooks are legitimate. Needs a mode switch (block private/link-local
 by default in SaaS, allow in self-hosted) plus DNS-rebinding-safe resolution at send time.
+
+## R18 — SSRF guard for tenant webhooks
+
+Closes the R17 finding. Details and the threat model are in `docs/SECURITY.md`; 436 backend tests
++ 6 full-chain.
+
+The audit found the problem was wider than "no destination check":
+- **"Send test" was a port scanner.** It ran synchronously in the API pod and returned the raw
+  exception, distinguishing refused, timeout and reset for any host:port a tenant named.
+- **Arbitrary tenant headers** meant `Metadata-Flavor: Google` would make a GCP metadata fetch
+  succeed rather than 403.
+- **The same leak in stored errors**: delivery `last_error`, destination `disabled_reason` and the
+  notification ledger kept `str(e)`, all tenant-readable.
+
+Tests: `tests/test_netguard.py` (28, no DB — ranges, rebinding blocked at connect, redirects not
+followed, TLS verified by hostname against a local CA, safe error text) and
+`tests/integration/test_ssrf_guard.py` (API refuses internal URLs and metadata headers; a legacy
+pre-R18 internal destination is blocked at send and logged as `destination not allowed`).
+Mutation-checked: removing the transport hook fails both connect-time tests.
+
+Test-setup changes, stated so they are not mistaken for weakening: the Celery worker test and
+`fullstack.sh` run in self-hosted mode because their receivers are on 127.0.0.1; the outbound tests
+patch `netguard.post` instead of `httpx.post`.
+
+**Deploy note:** Helm installs now refuse webhooks to private addresses. A self-hosted Helm install
+that posts to internal services must set `OUTBOUND_ALLOW_PRIVATE: "true"`. Existing destinations
+pointing inside the cluster will start failing with `destination not allowed` and auto-disable
+after the usual number of failures.

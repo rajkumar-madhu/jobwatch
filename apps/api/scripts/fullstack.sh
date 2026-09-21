@@ -17,6 +17,10 @@ cd "$(dirname "$0")/.."
 : "${DATABASE_URL:?set DATABASE_URL (jobwatch_app role, not a superuser — RLS must be on)}"
 : "${SECRET_ENCRYPTION_KEY:?set SECRET_ENCRYPTION_KEY}"
 export REDIS_URL=${REDIS_URL:-redis://localhost:6379/0} NATS_URL=${NATS_URL:-nats://localhost:4222}
+# R18: the full-chain test's webhook receiver listens on 127.0.0.1, which the SSRF guard blocks in
+# the default (SaaS) mode. So this stack runs in self-hosted mode; the blocking behaviour itself is
+# covered by tests/test_netguard.py and tests/integration/test_ssrf_guard.py.
+export OUTBOUND_ALLOW_PRIVATE=${OUTBOUND_ALLOW_PRIVATE:-true}
 
 # name|command — one per compose service (keycloak/web/scorer excluded: not on the alert path)
 SERVICES=(

@@ -3,6 +3,8 @@ import json
 from uuid import UUID
 
 import httpx
+
+from .. import netguard
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, HttpUrl
 from sqlalchemy import text
@@ -71,6 +73,10 @@ def list_destinations(p: Principal = Depends(current_principal)):
 
 @router.post("/destinations", status_code=201)
 def create_destination(body: DestinationIn, request: Request, p: Principal = Depends(require_role("devops"))):
+    try:  # R18: refuse internal targets and dangerous headers when saved, with a clear reason
+        netguard.check_url(str(body.url)); netguard.check_headers(body.headers)
+    except netguard.BlockedDestination as e:
+        raise HTTPException(400, str(e))
     _check(body)
     cfg = {"url": str(body.url), "secret": body.secret, "headers": body.headers}
     with tenant_session(p.org_id) as s:
@@ -84,6 +90,10 @@ def create_destination(body: DestinationIn, request: Request, p: Principal = Dep
 
 @router.put("/destinations/{dest_id}")
 def update_destination(dest_id: UUID, body: DestinationIn, request: Request, p: Principal = Depends(require_role("devops"))):
+    try:  # R18: refuse internal targets and dangerous headers when saved, with a clear reason
+        netguard.check_url(str(body.url)); netguard.check_headers(body.headers)
+    except netguard.BlockedDestination as e:
+        raise HTTPException(400, str(e))
     _check(body)
     with tenant_session(p.org_id) as s:
         cfg = {"url": str(body.url), "secret": body.secret, "headers": body.headers}
@@ -121,10 +131,12 @@ def test_destination(dest_id: UUID, p: Principal = Depends(require_role("devops"
     headers = {"Content-Type": "application/json", "X-JobWatch-Signal-Id": sig.signal_id, "X-JobWatch-Schema": "jobwatch.signal/1", **cfg.get("headers", {})}
     if cfg.get("secret"): headers["X-JobWatch-Signature"] = sign(cfg["secret"], raw)
     try:
-        r = httpx.post(cfg["url"], content=raw, headers=headers, timeout=10)
+        r = netguard.post(cfg["url"], content=raw, headers=headers, timeout=10)
         return {"status_code": r.status_code, "ok": r.status_code < 400}
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        # R18: never str(e). It carried internal addresses and distinguished refused/timeout/reset —
+        # enough to port-scan the cluster from the API pod one "send test" at a time.
+        return {"ok": False, "error": netguard.describe_failure(e)}
 
 
 @router.get("/deliveries", response_model=list[SignalDeliveryOut])

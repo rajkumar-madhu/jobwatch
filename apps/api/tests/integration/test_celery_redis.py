@@ -65,9 +65,11 @@ HTTPServer(("127.0.0.1", 18099), H).serve_forever()
                                      "prev_state": "ok", "new_status": "failed", "prev_status": "healthy"}, {"name": "celery-e2e"}).envelope()
         deliver_signal.delay(str(org["id"]), str(d), env)   # real enqueue over Redis
 
+        # R18: the receiver is on 127.0.0.1, which the SSRF guard blocks in SaaS mode — run the
+        # worker in self-hosted mode. test_ssrf_guard.py covers the blocking side.
         worker = subprocess.Popen([sys.executable, "-m", "celery", "-A", "cronsentinel.celery_app.celery",
                                    "worker", "-Q", "notify", "-l", "warning", "--concurrency", "1", "-P", "solo"],
-                                  env={**os.environ}, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                  env={**os.environ, "OUTBOUND_ALLOW_PRIVATE": "true"}, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         deadline = time.time() + 45
         row = None
         while time.time() < deadline:

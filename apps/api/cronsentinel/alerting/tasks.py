@@ -7,6 +7,8 @@ from datetime import UTC, datetime
 from email.message import EmailMessage
 
 import httpx
+
+from .. import netguard  # R18: tenant-supplied URLs are fetched only through the SSRF guard
 import redis
 import structlog
 from sqlalchemy import text
@@ -41,17 +43,17 @@ def _send_email(cfg, title, body):
 def _send_slack(cfg, title, body, p):
     color = {"critical": "#dc2626", "high": "#ea580c", "medium": "#d97706", "low": "#2563eb"}[p["severity"]]
     if p["condition"] == "recovered": color = "#16a34a"
-    httpx.post(cfg["webhook_url"], json={"text": title, "attachments": [{"color": color, "text": body}]}, timeout=10).raise_for_status()
+    netguard.post(cfg["webhook_url"], json={"text": title, "attachments": [{"color": color, "text": body}]}, timeout=10).raise_for_status()
 
 
 def _send_teams(cfg, title, body, p):
-    httpx.post(cfg["webhook_url"], json={"@type": "MessageCard", "@context": "http://schema.org/extensions", "summary": title,
+    netguard.post(cfg["webhook_url"], json={"@type": "MessageCard", "@context": "http://schema.org/extensions", "summary": title,
                                           "themeColor": "dc2626" if p["new_status"] in ("failed", "missed", "timeout") else "16a34a",
                                           "title": title, "text": body.replace("\n", "<br>")}, timeout=10).raise_for_status()
 
 
 def _send_discord(cfg, title, body, p):
-    httpx.post(cfg["webhook_url"], json={"content": f"**{title}**\n```{body}```"}, timeout=10).raise_for_status()
+    netguard.post(cfg["webhook_url"], json={"content": f"**{title}**\n```{body}```"}, timeout=10).raise_for_status()
 
 
 def _send_telegram(cfg, title, body, p):
@@ -64,7 +66,7 @@ def _send_webhook(cfg, title, body, p):
     headers = {"Content-Type": "application/json", "User-Agent": "JobWatch/0.1"}
     if cfg.get("secret"):
         headers["X-JobWatch-Signature"] = "sha256=" + hmac.new(cfg["secret"].encode(), raw, hashlib.sha256).hexdigest()
-    httpx.post(cfg["url"], content=raw, headers=headers, timeout=10).raise_for_status()
+    netguard.post(cfg["url"], content=raw, headers=headers, timeout=10).raise_for_status()
 
 
 _SENDERS = {"email": lambda c, t, b, p: _send_email(c, t, b), "slack": _send_slack, "teams": _send_teams,
@@ -92,7 +94,8 @@ def send_notification(self, org_id: str, channel_id: str, dedup_key: str, incide
             _SENDERS[ch.kind](cfg, title, body, payload)
             status, err = "sent", None
         except Exception as e:
-            status, err = "failed", str(e)[:500]
+            # R18: the ledger is tenant-visible (/alerts/ledger); store a category, not the raw exception.
+            status, err = "failed", netguard.tenant_error(e)
         s.execute(text("INSERT INTO notification_ledger (org_id, incident_id, channel_id, dedup_key, status, error) VALUES (:o, :i, :c, :k, :st, :e)"),
                   {"o": org_id, "i": incident_id, "c": channel_id, "k": dedup_key, "st": status, "e": err})
         if incident_id:

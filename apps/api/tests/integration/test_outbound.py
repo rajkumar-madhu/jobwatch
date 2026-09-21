@@ -41,7 +41,7 @@ def test_delivery_is_signed_and_ledgered(org):
     class R: status_code = 202
     def fake_post(url, content, headers, timeout):
         seen.update(url=url, headers=headers, body=content); return R()
-    with patch.object(deliver.httpx, "post", fake_post):
+    with patch.object(deliver.netguard, "post", fake_post):
         deliver.deliver_signal.apply(args=(str(org["id"]), str(d), env)).get()
     assert seen["url"] == "https://aegis.example.test/ingest"
     assert seen["headers"]["X-JobWatch-Signature"] == deliver.sign("s3cr3t-s3cr3t-s3cr3t", seen["body"])
@@ -59,7 +59,7 @@ def test_delivery_failure_is_recorded_and_retried(org):
     env = schema.from_agent({"id": "a", "org_id": str(org["id"])}, False).envelope()
 
     class R: status_code = 503
-    with patch.object(deliver.httpx, "post", lambda *a, **k: R()):
+    with patch.object(deliver.netguard, "post", lambda *a, **k: R()):
         try:
             deliver.deliver_signal.apply(args=(str(org["id"]), str(d), env), throw=True).get()
         except Exception:

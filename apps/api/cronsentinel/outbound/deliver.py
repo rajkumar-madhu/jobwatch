@@ -6,6 +6,8 @@ import hmac
 import json
 
 import httpx
+
+from .. import netguard
 import structlog
 from sqlalchemy import text
 
@@ -30,7 +32,9 @@ def _post_webhook(cfg: dict, raw: bytes, signal_id: str) -> int:
         headers["X-JobWatch-Signature"] = sign(cfg["secret"], raw)
     for k, v in (cfg.get("headers") or {}).items():
         headers[k] = v
-    r = httpx.post(cfg["url"], content=raw, headers=headers, timeout=10)
+    # R18: through the SSRF guard. Custom headers are re-checked here, not only at save time,
+    # because destinations saved before R18 were never validated.
+    r = netguard.post(cfg["url"], content=raw, headers=headers, timeout=10)
     return r.status_code
 
 
@@ -64,14 +68,18 @@ def deliver_signal(self, org_id: str, destination_id: str, envelope: dict):
             s.execute(text("UPDATE signal_destinations SET consecutive_failures=0 WHERE id=:d"), {"d": destination_id})
     except Exception as e:
         final = self.request.retries >= MAX_ATTEMPTS
+        # R18: last_error and disabled_reason are tenant-visible (/deliveries, /destinations). The raw
+        # exception text named internal addresses and told refused from timeout — log it, store a category.
+        log.warning("signal delivery failed", destination=destination_id, error=repr(e)[:500])
+        err = netguard.tenant_error(e)
         with system_session() as s:
             s.execute(text("UPDATE signal_deliveries SET status=:st, last_error=:err WHERE destination_id=:d AND signal_id=:sid"),
-                      {"st": "dead" if final else "failed", "err": str(e)[:500], "d": destination_id, "sid": sid})
+                      {"st": "dead" if final else "failed", "err": err, "d": destination_id, "sid": sid})
             if final:
                 row = s.execute(text("""UPDATE signal_destinations SET consecutive_failures = consecutive_failures + 1,
                     enabled = CASE WHEN consecutive_failures + 1 >= :n THEN false ELSE enabled END,
                     disabled_reason = CASE WHEN consecutive_failures + 1 >= :n THEN 'auto-disabled: ' || :err ELSE disabled_reason END
-                    WHERE id=:d RETURNING enabled"""), {"n": AUTO_DISABLE_AFTER, "err": str(e)[:200], "d": destination_id}).first()
+                    WHERE id=:d RETURNING enabled"""), {"n": AUTO_DISABLE_AFTER, "err": err, "d": destination_id}).first()
                 if row and not row.enabled:
                     log.warning("signal destination auto-disabled", destination=destination_id)
         raise

@@ -17,6 +17,10 @@ env:                      # rendered into a Secret; supply real values via --set
   COOKIE_SECURE: "true"
   COPILOT_BASE_URL: http://vllm:8000
   COPILOT_MODEL: Qwen/Qwen2.5-14B-Instruct
+  COPILOT_ALLOW_EXTERNAL: "false"   # R16: refuse non-private LLM endpoints unless deliberately set
+  # R18 SSRF guard: "false" = tenant webhooks reach public addresses only (multi-tenant SaaS).
+  # Set "true" only for a single-tenant install that posts to internal services.
+  OUTBOUND_ALLOW_PRIVATE: "false"
   STRIPE_SECRET_KEY: ""
   STRIPE_WEBHOOK_SECRET: ""
 replicas: {api: 2, ingest: 2, web: 2, execProcessor: 2, reconciler: 1, scheduleGenerator: 1, outboundExporter: 1, ruleEngine: 1, notifier: 2, scorer: 1}

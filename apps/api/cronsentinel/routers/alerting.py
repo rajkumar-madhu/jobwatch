@@ -54,6 +54,13 @@ def create_channel(body: ChannelIn, request: Request, p: Principal = Depends(req
     if body.kind not in _KINDS: raise HTTPException(400, f"kind must be one of {list(_KINDS)}")
     missing = [k for k in _KINDS[body.kind] if k not in body.config]
     if missing: raise HTTPException(400, f"config missing {missing}")
+    from .. import netguard
+    for key in ("url", "webhook_url"):  # R18: webhook, slack, teams, discord
+        if key in body.config:
+            try:
+                netguard.check_url(str(body.config[key]))
+            except netguard.BlockedDestination as e:
+                raise HTTPException(400, f"{key}: {e}")
     with tenant_session(p.org_id) as s:
         feats = s.execute(text("SELECT pl.features FROM organizations o JOIN plan_limits pl ON pl.plan=o.plan WHERE o.id=:o"), {"o": str(p.org_id)}).scalar()
         if feats and "all" not in feats and body.kind not in feats:

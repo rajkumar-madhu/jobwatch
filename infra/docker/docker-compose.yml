@@ -11,6 +11,9 @@ x-api-env: &api-env
   API_PUBLIC_URL: http://localhost:8000
   WEB_PUBLIC_URL: http://localhost:3000
   COPILOT_BASE_URL: http://ollama:11434
+  # R18 SSRF guard. Compose is the single-tenant/self-hosted path, where webhooks to internal
+  # services are normal, so this is on. A multi-tenant deploy must leave it false.
+  OUTBOUND_ALLOW_PRIVATE: "${OUTBOUND_ALLOW_PRIVATE:-true}"
   COPILOT_MODEL: qwen2.5:14b
 
 services:
