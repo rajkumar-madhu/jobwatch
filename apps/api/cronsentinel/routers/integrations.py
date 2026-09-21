@@ -10,6 +10,7 @@ from sqlalchemy import text
 from ..auth import Principal, audit, current_principal, require_role
 from ..crypto import decrypt_json, encrypt_json
 from ..db import tenant_session
+from ..schemas import SignalDeliveryOut, SignalDestinationOut, SignalSchemaOut
 from ..outbound import schema
 from ..outbound.deliver import sign
 
@@ -40,7 +41,7 @@ def _check(body: DestinationIn):
         raise HTTPException(400, "destination host not allowed")
 
 
-@router.get("/schema")
+@router.get("/schema", response_model=SignalSchemaOut, response_model_by_alias=True)
 def signal_schema():
     """Published contract for consumers (AEGIS reads this, not the DB)."""
     return {"schema": schema.SCHEMA, "version": schema.VERSION, "event_types": list(schema.EVENT_TYPES),
@@ -52,7 +53,7 @@ def signal_schema():
                                              {"name": "nightly-backup", "kind": "cron", "workspace_id": "…"}).envelope()}
 
 
-@router.get("/destinations")
+@router.get("/destinations", response_model=list[SignalDestinationOut])
 def list_destinations(p: Principal = Depends(current_principal)):
     with tenant_session(p.org_id) as s:
         rows = s.execute(text("""SELECT id, name, kind, event_types, workspace_ids, enabled, consecutive_failures, disabled_reason, created_at,
@@ -126,7 +127,7 @@ def test_destination(dest_id: UUID, p: Principal = Depends(require_role("devops"
         return {"ok": False, "error": str(e)}
 
 
-@router.get("/deliveries")
+@router.get("/deliveries", response_model=list[SignalDeliveryOut])
 def deliveries(limit: int = 100, p: Principal = Depends(current_principal)):
     with tenant_session(p.org_id) as s:
         return [dict(r._mapping) for r in s.execute(text("""SELECT d.id, d.destination_id, sd.name AS destination, d.signal_id, d.event_type, d.status,

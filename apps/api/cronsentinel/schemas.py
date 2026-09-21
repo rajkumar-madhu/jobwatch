@@ -333,3 +333,52 @@ class JobAnalyticsOut(BaseModel):
     drift_pct: float | None = None
     sla_met: bool | None = None
     est_cost_usd: float | None = None
+
+
+# ---------------------------------------------------------------------------
+# R16 — R4's integrations reads. These were missed by R14/R15 because the UNMODELLED guard only
+# checked a hand-listed set of paths, not every GET; the guard now scans the route table.
+# ---------------------------------------------------------------------------
+
+
+class SignalDestinationOut(BaseModel):
+    id: UUID
+    name: str
+    kind: str
+    event_types: list[str] = []
+    workspace_ids: list[UUID] | None = None
+    enabled: bool
+    consecutive_failures: int = 0
+    disabled_reason: str | None = None
+    created_at: datetime
+    sent_24h: int = 0
+    failed_24h: int = 0
+    url: str | None = None
+    # Never the secret itself — only whether one is configured.
+    has_secret: bool = False
+
+
+class SignalDeliveryOut(BaseModel):
+    id: UUID
+    destination_id: UUID
+    destination: str
+    signal_id: str
+    event_type: str
+    status: str
+    attempts: int
+    last_error: str | None = None
+    response_code: int | None = None
+    created_at: datetime
+    sent_at: datetime | None = None
+
+
+class SignalSchemaOut(BaseModel):
+    schema_: str = Field(alias="schema")
+    version: int | str
+    event_types: list[str]
+    headers: list[str]
+    signature: str
+    idempotency: str
+    example: dict
+
+    model_config = {"populate_by_name": True}

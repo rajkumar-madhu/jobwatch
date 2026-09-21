@@ -37,13 +37,39 @@ COVERED = {
     "/api/v1/clusters": "/api/v1/clusters",
     "/api/v1/topology": "/api/v1/topology",
     "/api/v1/analytics/jobs": "/api/v1/analytics/jobs",
+    # R16 additions
+    "/api/v1/logs/search": "/api/v1/logs/search",
+    "/api/v1/integrations/destinations": "/api/v1/integrations/destinations",
+    "/api/v1/integrations/deliveries": "/api/v1/integrations/deliveries",
+    "/api/v1/integrations/schema": "/api/v1/integrations/schema",
 }
 
 # Read endpoints the dashboard uses that still return a bare dict. Each one is a gap: the mock's
 # shape for it is unvalidated. Shrink this list by adding a response_model, do not delete entries.
-# R15 modelled all six that were listed here. Empty is the goal state; the assertion below still
-# guards the other direction, so a new bare-dict read endpoint has to be added here consciously.
-UNMODELLED: set[str] = set()
+# Read endpoints that still return a bare dict, *discovered from the route table* (see
+# test_every_read_endpoint_is_modelled_or_acknowledged). Before R16 this was a hand-written list and
+# the guard only checked the paths already on it — so R4's integrations reads, never listed, were
+# never flagged. Every entry below is a GET whose response shape nothing validates.
+UNMODELLED: set[str] = {
+    # Generated from the route table at R16 — detail/drill-down reads off the dashboard's main
+    # paths. Each is a known gap: nothing validates its response shape.
+    "/api/v1/alerts/ledger",
+    "/api/v1/alerts/maintenance",
+    "/api/v1/analytics/mttr",
+    "/api/v1/analytics/report",
+    "/api/v1/api-keys",
+    "/api/v1/audit-logs",
+    "/api/v1/billing",
+    "/api/v1/clusters/{cluster_id}/cronjobs",
+    "/api/v1/copilot/history",
+    "/api/v1/copilot/suggestions",
+    "/api/v1/executions/{execution_id}",
+    "/api/v1/executions/{execution_id}/compare/{other_id}",
+    "/api/v1/incidents/{incident_id}",
+    "/api/v1/jobs/{job_id}/impact",
+    "/api/v1/jobs/{job_id}/next-runs",
+    "/api/v1/me",
+}
 
 
 @pytest.fixture(scope="module")
@@ -92,12 +118,19 @@ def test_mock_response_validates_against_the_real_schema(spec, mock_client, real
     )
 
 
-def test_unmodelled_read_endpoints_are_the_known_set(spec):
-    """Guards the gap list in both directions: a new bare-dict read endpoint must be acknowledged,
-    and adding a response_model must remove its entry here."""
-    still_bare = set()
-    for path in UNMODELLED:
-        if path in spec["paths"] and _schema_for(spec, path) is None:
-            still_bare.add(path)
-    fixed = UNMODELLED - still_bare
-    assert not fixed, f"these endpoints now declare a response_model — remove them from UNMODELLED: {sorted(fixed)}"
+def _bare_reads(spec) -> set[str]:
+    return {p for p, v in spec["paths"].items()
+            if p.startswith("/api/v1/") and "get" in v and _schema_for(spec, p) is None}
+
+
+def test_every_read_endpoint_is_modelled_or_acknowledged(spec):
+    """Scans the whole route table. A new GET without a response_model fails here until it is either
+    modelled or consciously added to UNMODELLED — this is the check R15 claimed to have and didn't."""
+    unacknowledged = sorted(_bare_reads(spec) - UNMODELLED)
+    assert not unacknowledged, f"read endpoints with no response_model and no UNMODELLED entry: {unacknowledged}"
+
+
+def test_unmodelled_list_has_no_stale_entries(spec):
+    """The other direction: once an endpoint gains a model, its UNMODELLED entry must go."""
+    stale = sorted(UNMODELLED - _bare_reads(spec))
+    assert not stale, f"these now declare a response_model (or no longer exist) — remove from UNMODELLED: {stale}"

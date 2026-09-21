@@ -79,3 +79,6 @@ export type Topology = S["TopologyOut"];
 export type LogSearch = S["LogSearchOut"];
 export type Series = S["SeriesOut"];
 export type JobAnalytics = S["JobAnalyticsOut"];
+export type SignalDestination = S["SignalDestinationOut"];
+export type SignalDelivery = S["SignalDeliveryOut"];
+export type SignalSchema = S["SignalSchemaOut"];

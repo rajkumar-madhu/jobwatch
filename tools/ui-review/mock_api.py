@@ -74,13 +74,35 @@ def inc(iid: str):
             "notifications": [{"sent_at": iso(now - timedelta(minutes=58)), "kind": "slack", "name": "ops-alerts", "status": "sent", "error": None}, {"sent_at": iso(now - timedelta(minutes=58)), "kind": "email", "name": "oncall", "status": "sent", "error": None}],
             "affected_jobs": [{"id": jid, "name": byid[jid]["name"], "status": byid[jid]["status"], "last_run_at": byid[jid]["last_run_at"]} for jid in i["affected_job_ids"]], "executions": EX[i["affected_job_ids"][0]][:4], "downstream_impact": {i["affected_job_ids"][0]: [{"id": JOBS[4]["id"], "name": "log-cleanup", "status": "healthy", "depth": 1}]}}
 @app.get("/api/v1/logs/search")
-def logs(q: str | None = None, **kw):
+# R16: was `**kw`, which FastAPI reads as a *required* query param named "kw" — every call 422'd
+# and the Logs page only ever rendered its error state against this mock. Mirror the real params.
+def logs(q: str | None = None, job_id: str | None = None, stream: str | None = None, host: str | None = None,
+         status: str | None = None, since: str | None = None, limit: int = 200):
     items = []
     for j in JOBS[:6]:
         for e in EX[j["id"]][:3]:
             if e["status"] == "failed": items.append({"execution_id": e["id"], "stream": "stderr", "content": 'psycopg2.OperationalError: connection to server at "prod-db-01" failed: timeout expired\n(12 retries exhausted)\n', "job_id": j["id"], "job_name": j["name"], "status": "failed", "host": e["host"], "scheduled_ts": e["scheduled_ts"], "exit_code": 2})
             items.append({"execution_id": e["id"], "stream": "stdout", "content": f"starting {j['name']}\nprocessed 48,211 rows in 14.2s\ndone", "job_id": j["id"], "job_name": j["name"], "status": e["status"], "host": e["host"], "scheduled_ts": e["scheduled_ts"], "exit_code": e["exit_code"]})
     return {"items": items[:12], "hosts": ["prod-web-01", "prod-db-01", "backup-01"]}
+# R16: R4's integrations endpoints were never mocked — the Integrations page rendered against 404s
+# since R4 and R12's e2e did not notice (its assertions ran before the queries failed).
+_DEST = str(uuid.uuid5(uuid.NAMESPACE_DNS, "jobwatch-demo-dest"))
+@app.get("/api/v1/integrations/schema")
+def sig_schema(): return {"schema": "jobwatch.signal/1", "version": 1, "event_types": ["job.state_changed", "job.failed", "job.missed", "job.recovered"],
+                          "headers": ["X-JobWatch-Signal-Id", "X-JobWatch-Schema", "X-JobWatch-Signature"],
+                          "signature": "sha256 HMAC of raw body with the destination secret, as 'sha256=<hex>'",
+                          "idempotency": "dedupe on signal_id; deliveries may repeat on retry",
+                          "example": {"schema": "jobwatch.signal/1", "event_type": "job.failed", "signal_id": "sig_demo"}}
+@app.get("/api/v1/integrations/destinations")
+def sig_dests(): return [{"id": _DEST, "name": "aegis-prod", "kind": "webhook", "event_types": ["job.failed", "job.missed"], "workspace_ids": None,
+                          "enabled": True, "consecutive_failures": 0, "disabled_reason": None, "created_at": CREATED, "sent_24h": 42, "failed_24h": 1,
+                          "url": "https://aegis.example.internal/ingest/jobwatch", "has_secret": True}]
+@app.get("/api/v1/integrations/deliveries")
+def sig_deliveries(limit: int = 100): return [{"id": str(uuid.uuid5(uuid.NAMESPACE_DNS, f"dlv{i}")), "destination_id": _DEST, "destination": "aegis-prod",
+                                               "signal_id": f"sig_{i:04d}", "event_type": "job.failed", "status": "sent" if i else "failed", "attempts": 1 if i else 3,
+                                               "last_error": None if i else "connect timeout", "response_code": 202 if i else None,
+                                               "created_at": iso(now - timedelta(minutes=5 * i)), "sent_at": iso(now - timedelta(minutes=5 * i)) if i else None}
+                                              for i in range(min(limit, 5))]
 @app.get("/api/v1/agents")
 def agents(): return [{"id": "a1", "kind": "linux", "name": "prod-db-01", "host_id": "4c9e1f…", "version": "0.1.0", "status": "active", "last_seen_at": iso(now - timedelta(seconds=20)), "skew_ms": 38, "revoked_at": None, "created_at": CREATED, "jobs": 3}, {"id": "a2", "kind": "linux", "name": "backup-01", "host_id": "9a02bb…", "version": "0.1.0", "status": "active", "last_seen_at": iso(now - timedelta(minutes=9)), "skew_ms": 7200, "revoked_at": None, "created_at": CREATED, "jobs": 2}, {"id": "a3", "kind": "k8s", "name": "production", "host_id": "k8s:production", "version": "0.1.0", "status": "active", "last_seen_at": iso(now - timedelta(seconds=40)), "skew_ms": -12, "revoked_at": None, "created_at": CREATED, "jobs": 6}]
 @app.get("/api/v1/alerts/channels")

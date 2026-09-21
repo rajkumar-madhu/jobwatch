@@ -20,3 +20,4 @@ agent.json
 # playwright
 apps/web/playwright-report/
 apps/web/test-results/
+apps/web/tsconfig.tsbuildinfo

@@ -14,8 +14,19 @@ function LogsInner() {
   const [f, setF] = useState({ q: sp.get("q") ?? "", job_id: sp.get("job_id") ?? "", stream: sp.get("stream") ?? "", host: "", status: "", hours: "24" });
   const [applied, setApplied] = useState(f);
   const jobs = useQuery({ queryKey: ["jobs", "all"], queryFn: () => api<{ items: Job[] }>("/api/v1/jobs?limit=200") });
-  const params = new URLSearchParams(Object.entries({ q: applied.q, job_id: applied.job_id, stream: applied.stream, host: applied.host, status: applied.status, since: new Date(Date.now() - Number(applied.hours) * 3600e3).toISOString(), limit: "200" }).filter(([, v]) => v));
-  const q = useQuery({ queryKey: ["logs", params.toString()], queryFn: () => api<{ items: LogRow[]; hosts: string[] }>(`/api/v1/logs/search?${params}`) });
+  // R16: `since` used to be computed here, during render, and baked into the query key. Date.now()
+  // differs on every render, so every render made a new key, which fetched, which re-rendered —
+  // ~113 requests/second per open tab against the partitioned execution_logs table. The key is now
+  // the applied *filters* (stable); the rolling window is computed inside queryFn, so each fetch —
+  // including the 15s background poll — still gets a fresh "last N hours".
+  const q = useQuery({
+    queryKey: ["logs", applied],
+    queryFn: () => {
+      const since = new Date(Date.now() - Number(applied.hours) * 3600e3).toISOString();
+      const params = new URLSearchParams(Object.entries({ q: applied.q, job_id: applied.job_id, stream: applied.stream, host: applied.host, status: applied.status, since, limit: "200" }).filter(([, v]) => v));
+      return api<{ items: LogRow[]; hosts: string[] }>(`/api/v1/logs/search?${params}`);
+    },
+  });
   const sel = "rounded-md border border-line bg-panel px-2 py-1.5 text-sm";
   const hl = (c: string) => applied.q ? c.split(new RegExp(`(${applied.q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "ig")).map((p, i) => p.toLowerCase() === applied.q.toLowerCase() ? <mark key={i} className="bg-warn/30">{p}</mark> : p) : c;
   return (

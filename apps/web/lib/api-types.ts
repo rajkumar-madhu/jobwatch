@@ -1830,6 +1830,109 @@ export interface components {
             /** P95 Ms */
             p95_ms?: number | null;
         };
+        /** SignalDeliveryOut */
+        SignalDeliveryOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Destination Id
+             * Format: uuid
+             */
+            destination_id: string;
+            /** Destination */
+            destination: string;
+            /** Signal Id */
+            signal_id: string;
+            /** Event Type */
+            event_type: string;
+            /** Status */
+            status: string;
+            /** Attempts */
+            attempts: number;
+            /** Last Error */
+            last_error?: string | null;
+            /** Response Code */
+            response_code?: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Sent At */
+            sent_at?: string | null;
+        };
+        /** SignalDestinationOut */
+        SignalDestinationOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Kind */
+            kind: string;
+            /**
+             * Event Types
+             * @default []
+             */
+            event_types: string[];
+            /** Workspace Ids */
+            workspace_ids?: string[] | null;
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Consecutive Failures
+             * @default 0
+             */
+            consecutive_failures: number;
+            /** Disabled Reason */
+            disabled_reason?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Sent 24H
+             * @default 0
+             */
+            sent_24h: number;
+            /**
+             * Failed 24H
+             * @default 0
+             */
+            failed_24h: number;
+            /** Url */
+            url?: string | null;
+            /**
+             * Has Secret
+             * @default false
+             */
+            has_secret: boolean;
+        };
+        /** SignalSchemaOut */
+        SignalSchemaOut: {
+            /** Schema */
+            schema: string;
+            /** Version */
+            version: number | string;
+            /** Event Types */
+            event_types: string[];
+            /** Headers */
+            headers: string[];
+            /** Signature */
+            signature: string;
+            /** Idempotency */
+            idempotency: string;
+            /** Example */
+            example: {
+                [key: string]: unknown;
+            };
+        };
         /** StatusPageOut */
         StatusPageOut: {
             /**
@@ -4305,7 +4408,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["SignalSchemaOut"];
                 };
             };
         };
@@ -4329,7 +4432,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["SignalDestinationOut"][];
                 };
             };
             /** @description Validation Error */
@@ -4508,7 +4611,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["SignalDeliveryOut"][];
                 };
             };
             /** @description Validation Error */

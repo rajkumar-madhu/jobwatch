@@ -467,3 +467,62 @@ as `undefined`. Hand-written interfaces had hidden this.
 ### Limits
 Only response shapes are typed. Request bodies, query parameters and status codes are not, so a
 wrong POST body is still a runtime 422. Typing those is the next increment if it is wanted.
+
+## R16 — own-the-stack audit: fonts, Copilot data boundary
+
+Triggered by a "what did we miss" review. Two principle issues were fixed; fixing them surfaced a
+production bug and showed that part of R12/R15's coverage was not what it claimed.
+397 backend tests, 20 vitest, 44 Playwright.
+
+### Fonts
+IBM Plex was loaded from `fonts.googleapis.com` at render time — a third-party request on every
+page load, and a hard failure mode for air-gapped deploys. Now bundled via `@fontsource`
+(SIL OFL 1.1, redistribution permitted), imported in `app/layout.tsx`. The e2e allow-list for
+Google Fonts is gone; instead **any request to a host other than the app and the API fails the
+page test**.
+
+### Copilot data boundary (`cronsentinel/copilot/egress.py`)
+The default backend was already self-hosted (OpenAI-compatible vLLM/Ollama), but nothing enforced
+it. Three gaps:
+
+1. **External endpoints are now refused** unless `COPILOT_ALLOW_EXTERNAL=true`. Internal means
+   loopback, RFC 1918 / ULA literals, single-label names (Kubernetes Services), or a configured
+   suffix (`COPILOT_INTERNAL_SUFFIXES`, default `.svc,.cluster.local,.internal,.local,.lan`).
+   Link-local is excluded so `169.254.169.254` never counts as internal. Decided on the configured
+   name, not by DNS resolution — slower and repointable; ambiguous means external.
+2. **When external is allowed, topology is pseudonymised**: hosts, pods, nodes, k8s object names
+   and IPv4s become `host-1`, `pod-2`, `ip-1`, including inside free text (stderr, failure
+   reasons, commands). Tokens are mapped back in the answer, so the user sees real names and the
+   model can still correlate "the same host" across jobs.
+3. **Redaction gaps closed**: `failure_reason`, k8s event `message`, incident title and
+   `correlation_signals`, and the user's question now pass through `redact()` — for internal
+   endpoints too, since a self-hosted model still logs prompts. The 502 no longer echoes the raw
+   httpx error, which contained the LLM endpoint URL, to every tenant.
+
+`tests/integration/test_copilot_egress_e2e.py` asserts on the bytes a fake LLM server actually
+receives. Mutation-checked: removing failure_reason redaction, pseudonymisation, or question
+redaction each fails the suite.
+
+**Deploy note:** anyone running the Copilot against a public API will get a 503 after upgrading
+until they set `COPILOT_ALLOW_EXTERNAL=true` deliberately.
+
+### Production bug found: Logs page refetch loop
+`app/(app)/logs/page.tsx` computed `since` from `Date.now()` during render and put it in the query
+key. Every render produced a new key, which fetched, which re-rendered: **~113 requests/second per
+open tab** against the partitioned `execution_logs` table. The key is now the applied filters; the
+rolling window is computed inside `queryFn`, so the 15s poll still gets a fresh window. Other
+render-time `Date.now()` uses were checked and are display-only.
+
+The page e2e test now counts API calls per path and fails above 3 in the settle window.
+
+### Coverage that was not what it claimed
+- **R12**: `/logs` and `/integrations` had rendered only their error state against the mock since
+  R12 — the mock's `logs(**kw)` made FastAPI require a query param named `kw` (every call 422'd),
+  and R4's integrations routes were never mocked (404). Both passed because assertions ran before
+  the queries failed. Page tests now wait for the initial queries to settle (bounded, since the 15s
+  poll means some pages never fully idle).
+- **R15**: the docs said a new bare-dict read endpoint would fail the contract guard. It would not —
+  the guard only checked paths already on its hand-written list, which is how R4's integrations
+  reads were missed. It now scans the route table in both directions. R4's reads gained models
+  (`SignalDestinationOut`, `SignalDeliveryOut`, `SignalSchemaOut`) and contract coverage; **16
+  detail reads remain unmodelled**, listed in the test as generated from the route table.

@@ -5788,7 +5788,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SignalSchemaOut"
+                }
               }
             }
           }
@@ -5857,7 +5859,13 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SignalDestinationOut"
+                  },
+                  "title": "Response List Destinations Api V1 Integrations Destinations Get"
+                }
               }
             }
           },
@@ -6304,7 +6312,13 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SignalDeliveryOut"
+                  },
+                  "title": "Response Deliveries Api V1 Integrations Deliveries Get"
+                }
               }
             }
           },
@@ -8237,6 +8251,248 @@
           "missed"
         ],
         "title": "SeriesPoint"
+      },
+      "SignalDeliveryOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "destination_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Destination Id"
+          },
+          "destination": {
+            "type": "string",
+            "title": "Destination"
+          },
+          "signal_id": {
+            "type": "string",
+            "title": "Signal Id"
+          },
+          "event_type": {
+            "type": "string",
+            "title": "Event Type"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "attempts": {
+            "type": "integer",
+            "title": "Attempts"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "response_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response Code"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "sent_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sent At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "destination_id",
+          "destination",
+          "signal_id",
+          "event_type",
+          "status",
+          "attempts",
+          "created_at"
+        ],
+        "title": "SignalDeliveryOut"
+      },
+      "SignalDestinationOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "event_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Event Types",
+            "default": []
+          },
+          "workspace_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Ids"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "consecutive_failures": {
+            "type": "integer",
+            "title": "Consecutive Failures",
+            "default": 0
+          },
+          "disabled_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disabled Reason"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "sent_24h": {
+            "type": "integer",
+            "title": "Sent 24H",
+            "default": 0
+          },
+          "failed_24h": {
+            "type": "integer",
+            "title": "Failed 24H",
+            "default": 0
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "has_secret": {
+            "type": "boolean",
+            "title": "Has Secret",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "enabled",
+          "created_at"
+        ],
+        "title": "SignalDestinationOut"
+      },
+      "SignalSchemaOut": {
+        "properties": {
+          "schema": {
+            "type": "string",
+            "title": "Schema"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Version"
+          },
+          "event_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Event Types"
+          },
+          "headers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Headers"
+          },
+          "signature": {
+            "type": "string",
+            "title": "Signature"
+          },
+          "idempotency": {
+            "type": "string",
+            "title": "Idempotency"
+          },
+          "example": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Example"
+          }
+        },
+        "type": "object",
+        "required": [
+          "schema",
+          "version",
+          "event_types",
+          "headers",
+          "signature",
+          "idempotency",
+          "example"
+        ],
+        "title": "SignalSchemaOut"
       },
       "StatusPageOut": {
         "properties": {

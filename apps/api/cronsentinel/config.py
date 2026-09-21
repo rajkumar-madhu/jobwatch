@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     copilot_timeout_s: int = 60
     copilot_max_context_chars: int = 60_000
     copilot_rate_per_min: int = 20
+    # R16 data boundary: an endpoint outside the private network is refused unless this is set, and
+    # when it is set, hostnames/pods/nodes/IPs are pseudonymised before leaving. See copilot/egress.py.
+    copilot_allow_external: bool = False
+    copilot_internal_suffixes: str = ".svc,.cluster.local,.internal,.local,.lan"
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""
     secret_encryption_key: str = "change-me"

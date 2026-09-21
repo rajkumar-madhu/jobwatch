@@ -1,3 +1,10 @@
+// R16: IBM Plex bundled from node_modules (SIL OFL 1.1 — redistribution permitted). Only the
+// weights the UI uses; Next fingerprints and serves them from /_next/static.
+import "@fontsource/ibm-plex-sans/400.css";
+import "@fontsource/ibm-plex-sans/500.css";
+import "@fontsource/ibm-plex-sans/600.css";
+import "@fontsource/ibm-plex-mono/400.css";
+import "@fontsource/ibm-plex-mono/500.css";
 import "./globals.css";
 import type { Metadata } from "next";
 import { Providers } from "@/components/providers";
