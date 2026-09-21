@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 
 from croniter import croniter
 
-from .schedule import next_runs
+from .schedule import iter_runs, next_runs
 
 HORIZON = timedelta(hours=6)     # how far ahead slots are materialised
 BACKFILL_LIMIT = timedelta(days=2)  # cold start / long outage: never invent more than this much history
@@ -35,8 +35,11 @@ def slots_between(expr: str, tz: str, start: datetime, end: datetime, grace_s: i
     if start >= end:
         return []
     out: list[Slot] = []
-    for ts in next_runs(expr, tz, n=limit, after=start):
-        if ts > end:
+    # R19: lazy. This used next_runs(n=limit) — 2,000 occurrences computed eagerly and then cut at
+    # `end`, so an hourly job computed ~83 days of runs to keep 54, and a daily job ~5.5 years to
+    # keep 2. That fixed cost dominated slot generation at scale.
+    for ts in iter_runs(expr, tz, after=start):
+        if ts > end or len(out) >= limit:
             break
         out.append(Slot(ts, ts + timedelta(seconds=grace_s), deadline_for(ts, grace_s, expected_runtime_s)))
     return out

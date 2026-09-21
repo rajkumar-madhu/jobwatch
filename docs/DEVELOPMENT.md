@@ -605,3 +605,11 @@ patch `netguard.post` instead of `httpx.post`.
 that posts to internal services must set `OUTBOUND_ALLOW_PRIVATE: "true"`. Existing destinations
 pointing inside the cluster will start failing with `destination not allowed` and auto-disable
 after the usual number of failures.
+
+## R19 — load test
+
+See `docs/LOADTEST.md` for the harness, the numbers, and the hardware caveat. Summary: the
+schedule generator could not keep up at a few thousand jobs and, worse, held row locks that
+blocked heartbeat processing while it ran. Fixed (lazy occurrence iteration, bulk inserts, short
+per-batch transactions with a slot budget, horizon-aware revisits). 10k jobs now catch up 2.8M
+slots in 194 s on 1 vCPU. The reconciler has the same locking shape and is the next fix.

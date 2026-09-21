@@ -18,11 +18,19 @@ def human(expr: str) -> str:
         return expr
 
 
-def next_runs(expr: str, tz: str = "UTC", n: int = 5, after: datetime | None = None) -> list[datetime]:
+def iter_runs(expr: str, tz: str = "UTC", after: datetime | None = None):
+    """Lazy occurrence stream in the job's timezone, yielded as UTC. R19: callers that stop at a
+    time bound must use this — computing a fixed n up front is what made slot generation cost
+    ~95 ms per job regardless of how many slots it needed."""
     zone = ZoneInfo(tz)
-    base = (after or datetime.now(UTC)).astimezone(zone)
-    it = croniter(expr, base)
-    return [it.get_next(datetime).astimezone(UTC) for _ in range(n)]
+    it = croniter(expr, (after or datetime.now(UTC)).astimezone(zone))
+    while True:
+        yield it.get_next(datetime).astimezone(UTC)
+
+
+def next_runs(expr: str, tz: str = "UTC", n: int = 5, after: datetime | None = None) -> list[datetime]:
+    runs = iter_runs(expr, tz, after)
+    return [next(runs) for _ in range(n)]
 
 
 def next_run(expr: str, tz: str = "UTC", after: datetime | None = None) -> datetime:
