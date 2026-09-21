@@ -56,15 +56,20 @@ The generator did not finish 5,000 jobs within 150 s. Three compounding causes:
    50,000 slots per batch so no batch holds locks for long; jobs are revisited only when less
    than 30 minutes of materialised horizon remain; a pass never overruns into the next tick.
 
+## R20 follow-ups (fixed)
+
+| Change | Before | After |
+|---|---|---|
+| Reconciler: settle slots in one transaction, then recompute state in batches of 100 jobs, publishing per batch | one 13.6 s transaction holding `FOR UPDATE` on ~3,000 job rows | longest transaction 1.1 s (31 transactions); wall time ~15 s, unchanged |
+| Synthetic `missed` executions | one INSERT per slot (17,712 round-trips) | one `WITH … UPDATE … INSERT … SELECT` statement |
+| `recompute_state` at a week of every-minute history (10,080 executions/job) | p50 18.8 ms, p95 25.5 ms (3.9 ms at 30/job) | p50 9.0 ms, p95 11.2 ms with migration 0010's expression index |
+
+Events are published only after each batch commits, so a state that could still roll back is
+never announced. The index cannot be built `CONCURRENTLY` on a partitioned table; migration 0010's
+docstring has the per-partition procedure for large production tables.
+
 ## Open findings (not fixed)
 
-- **The reconciler has the same one-transaction shape.** Settling a 30-minute outage backlog held
-  locks for 13.6 s, touching 2,952 jobs — heartbeats for those jobs block for that long. Needs the
-  same batching as the generator.
-- **R17's timeline query sorts on an unindexed expression**
-  (`COALESCE(agent_ts_end, server_received_ts)`). Fine at 30 executions per job (3.9 ms). An
-  every-minute job accumulates ~10,000 executions a week; that case was **not measured**.
-  Suspected fix is an expression index; measure first.
 - **Analytics reads are 0.6–0.9 s for a 2k-job tenant** and the dashboard polls every 15 s. With
   many concurrent users that is significant DB load. Candidates: short-TTL caching or a rollup
   table maintained by a worker.

@@ -49,15 +49,20 @@ def _mark_late(s) -> list[tuple]:
 
 
 def _mark_missed(s) -> list[tuple]:
-    rows = s.execute(text("""
-        UPDATE expected_runs SET state='missed', settled_at=now()
-        WHERE state IN ('pending','late') AND execution_id IS NULL AND deadline < now()
-        RETURNING id, job_id, org_id, scheduled_for""")).all()
-    for r in rows:  # synthetic execution so history, SLA and the run strip show the gap
-        s.execute(text("""INSERT INTO executions (id, org_id, job_id, status, scheduled_ts, server_received_ts, expected_run_id)
-            VALUES (:id, :o, :j, 'missed', :ts, now(), :er) ON CONFLICT DO NOTHING"""),
-            {"id": f"missed-{r.job_id}-{int(r.scheduled_for.timestamp())}", "o": r.org_id, "j": r.job_id, "ts": r.scheduled_for, "er": r.id})
-    return rows
+    # R19/R20: one statement. The synthetic execution rows (history, SLA and the run strip show the
+    # gap) used to be inserted one round-trip per slot — 17,712 of them for a 30-minute outage at
+    # 10k jobs, inside the same transaction as everything else.
+    return s.execute(text("""
+        WITH m AS (
+            UPDATE expected_runs SET state='missed', settled_at=now()
+            WHERE state IN ('pending','late') AND execution_id IS NULL AND deadline < now()
+            RETURNING id, job_id, org_id, scheduled_for),
+        ins AS (
+            INSERT INTO executions (id, org_id, job_id, status, scheduled_ts, server_received_ts, expected_run_id)
+            SELECT 'missed-' || job_id || '-' || CAST(EXTRACT(EPOCH FROM scheduled_for) AS bigint), org_id, job_id,
+                   'missed', scheduled_for, now(), id
+            FROM m ON CONFLICT DO NOTHING)
+        SELECT id, job_id, org_id, scheduled_for FROM m""")).all()
 
 
 def _mark_timeouts(s) -> list[tuple]:
@@ -72,7 +77,12 @@ def _mark_timeouts(s) -> list[tuple]:
     return rows
 
 
-def tick(s) -> list[dict]:
+RECOMPUTE_BATCH = 100  # job rows locked per transaction during the state pass
+
+
+def settle(s) -> set[tuple]:
+    """Phase 1: settle slots (set-based UPDATEs on expected_runs; no job-row locks). Returns the
+    (job_id, org_id) pairs that need a state pass."""
     touched: set[tuple] = set()
     skipped = _settle_maintenance(s)
     for r in skipped: touched.add((r.job_id, r.org_id))
@@ -88,26 +98,48 @@ def tick(s) -> list[dict]:
         touched.add((r.id, r.org_id))
     if skipped:
         log.info("slots skipped (maintenance/paused)", slots=len(skipped))
+    return touched
+
+
+def recompute(s, jobs) -> list[dict]:
+    """Phase 2: four-state pass for a batch of jobs. recompute_state takes FOR UPDATE on each job
+    row, so the caller should keep batches small and commit between them."""
     out = []
-    for job_id, org_id in touched:
+    for job_id, org_id in jobs:
         ev = recompute_state(s, job_id, org_id)
         if ev:
             out.append(ev)
     return out
 
 
+def tick(s) -> list[dict]:
+    """Both phases in the caller's transaction — kept for tests and one-off use. The worker loop
+    runs them as separate short transactions instead; see main()."""
+    return recompute(s, sorted(settle(s), key=str))
+
+
 async def main():
+    """R20: settlement and the state pass are separate transactions, and the state pass commits
+    every RECOMPUTE_BATCH jobs. Before, all of it was one transaction: settling a 30-minute outage
+    at 10k jobs held FOR UPDATE on ~3,000 job rows for 13.6 s, and the exec-processor's
+    recompute_state for any of those jobs — i.e. their heartbeats — waited the whole time.
+    Events are published per batch, so the first alerts go out after one batch, not after all."""
     nc, js = await events.connect()
-    log.info("reconciler started", interval=settings.reconciler_interval_s)
+    log.info("reconciler started", interval=settings.reconciler_interval_s, batch=RECOMPUTE_BATCH)
     while True:
         t0 = time.monotonic()
         try:
             with system_session() as s:
-                changed = tick(s)
-            for c in changed:
-                await js.publish(f"jobstatus.{c['org_id']}", json.dumps(c).encode())
-            if changed:
-                log.info("reconciled", changes=len(changed))
+                touched = sorted(settle(s), key=str)   # stable order → predictable lock order
+            changes = 0
+            for i in range(0, len(touched), RECOMPUTE_BATCH):
+                with system_session() as s:
+                    changed = recompute(s, touched[i:i + RECOMPUTE_BATCH])
+                for c in changed:   # after commit: never announce a state that could still roll back
+                    await js.publish(f"jobstatus.{c['org_id']}", json.dumps(c).encode())
+                changes += len(changed)
+            if changes:
+                log.info("reconciled", changes=changes, jobs=len(touched), took_s=round(time.monotonic() - t0, 2))
         except Exception as e:
             log.error("reconciler tick failed", error=str(e))
         await asyncio.sleep(max(0, settings.reconciler_interval_s - (time.monotonic() - t0)))

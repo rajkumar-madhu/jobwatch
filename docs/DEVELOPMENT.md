@@ -613,3 +613,15 @@ schedule generator could not keep up at a few thousand jobs and, worse, held row
 blocked heartbeat processing while it ran. Fixed (lazy occurrence iteration, bulk inserts, short
 per-batch transactions with a slot budget, horizon-aware revisits). 10k jobs now catch up 2.8M
 slots in 194 s on 1 vCPU. The reconciler has the same locking shape and is the next fix.
+
+## R20 — reconciler locking, timeline index
+
+Closes two R19 open findings; numbers in `docs/LOADTEST.md`.
+- The reconciler now settles slots in one transaction and runs the state pass in batches of 100
+  jobs, each its own transaction, publishing events after each commit. Longest transaction on a
+  30-minute outage backlog at 10k jobs: 13.6 s → 1.1 s. Synthetic missed executions are one
+  statement instead of one INSERT per slot. `tick(s)` keeps its single-transaction behaviour for
+  tests; the worker uses `settle()` + `recompute()`.
+- Migration 0010 adds an expression index for R17's timeline sort, after measuring it: 18.8 ms →
+  9.0 ms per recompute at a week of every-minute history. Building it locks writes on
+  `executions` briefly; see the migration docstring for the per-partition route on large tables.

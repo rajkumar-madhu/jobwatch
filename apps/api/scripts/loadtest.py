@@ -105,19 +105,25 @@ def bench_reconciler(minutes_down: int) -> dict:
             ON CONFLICT DO NOTHING"""), {"m": minutes_down})
     backlog = count("""SELECT count(*) FROM expected_runs er JOIN organizations o ON o.id=er.org_id
                        WHERE o.slug LIKE 'load-%' AND er.state IN ('pending','late') AND er.deadline < now()""")
+    # Times the worker's real path (R20): settle in one transaction, then recompute in batches.
+    # max_lock_s is the longest single transaction — how long a heartbeat could wait on a job row.
     ticks, changes, t0 = [], 0, time.perf_counter()
     while True:
         a = time.perf_counter()
         with system_session() as s:
-            ch = reconciler.tick(s)
+            touched = sorted(reconciler.settle(s), key=str)
         ticks.append(time.perf_counter() - a)
-        changes += len(ch)
+        for i in range(0, len(touched), reconciler.RECOMPUTE_BATCH):
+            b = time.perf_counter()
+            with system_session() as s:
+                changes += len(reconciler.recompute(s, touched[i:i + reconciler.RECOMPUTE_BATCH]))
+            ticks.append(time.perf_counter() - b)
         remaining = count("""SELECT count(*) FROM expected_runs er JOIN organizations o ON o.id=er.org_id
                              WHERE o.slug LIKE 'load-%' AND er.state IN ('pending','late') AND er.deadline < now()""")
-        if not remaining or len(ticks) > 50:
+        if not remaining or len(ticks) > 500:
             break
-    return {"backlog_slots": backlog, "ticks": len(ticks), "wall_s": time.perf_counter() - t0,
-            "max_tick_s": max(ticks), "state_changes": changes, "remaining": remaining}
+    return {"backlog_slots": backlog, "transactions": len(ticks), "wall_s": round(time.perf_counter() - t0, 1),
+            "max_lock_s": round(max(ticks), 2), "state_changes": changes, "remaining": remaining}
 
 
 def bench_recompute(samples: int) -> dict:

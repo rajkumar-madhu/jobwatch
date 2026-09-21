@@ -5,7 +5,7 @@ from sqlalchemy import text
 def test_at_head():
     from cronsentinel.db import system_session
     with system_session() as s:
-        assert s.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0009"
+        assert s.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0010"
 
 
 def test_all_tenant_tables_force_rls():
