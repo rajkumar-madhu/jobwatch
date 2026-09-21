@@ -32,6 +32,14 @@ async def quiesce(js, *, exec_sub=None, rule_sub=None):
 async def js():
     from cronsentinel import events
     nc, j = await events.connect()
+    # R17: start from empty streams. Leftovers from another run (e.g. the full-stack test's
+    # reconciler publishing jobstatus events) made drain() counts wrong. These tests own the local
+    # broker — do not run them while scripts/fullstack.sh is up, it would lose its messages.
+    for stream in ("CS_EXEC", "CS_STATUS"):
+        try:
+            await j.purge_stream(stream)
+        except Exception:
+            pass  # stream not created yet; events.connect() ensures it on first publish
     yield j
     await nc.close()   # drain() waits on the shared durables' inflight and stalls the suite
 

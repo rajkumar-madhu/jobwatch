@@ -1,0 +1,52 @@
+# R17 — the whole backend on real processes, end to end. Separate from ci.yml because it takes
+# ~3 minutes (the missed-run leg waits for a real schedule slot to pass). Runs nightly, on demand,
+# and on PRs that touch the alert path.
+name: fullstack
+on:
+  workflow_dispatch:
+  schedule: [{cron: "30 2 * * *"}]
+  pull_request:
+    paths:
+      - "apps/api/cronsentinel/processor.py"
+      - "apps/api/cronsentinel/job_state.py"
+      - "apps/api/cronsentinel/states.py"
+      - "apps/api/cronsentinel/events.py"
+      - "apps/api/cronsentinel/workers/**"
+      - "apps/api/cronsentinel/alerting/**"
+      - "apps/api/cronsentinel/routers/heartbeat.py"
+      - "apps/api/cronsentinel/ingest_main.py"
+jobs:
+  chain:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env: {POSTGRES_USER: cs, POSTGRES_PASSWORD: cs, POSTGRES_DB: cronsentinel}
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 5s --health-retries 10
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+    env:
+      MIGRATION_DATABASE_URL: postgresql+psycopg://cs:cs@localhost:5432/cronsentinel
+      JOBWATCH_APP_DB_PASSWORD: app
+      DATABASE_URL: postgresql+psycopg://jobwatch_app:app@localhost:5432/cronsentinel
+      SECRET_ENCRYPTION_KEY: ci-fullstack
+      REDIS_URL: redis://localhost:6379/0
+      NATS_URL: nats://localhost:4222
+      JOBWATCH_FULLSTACK: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      # NATS needs -js, which the services block cannot pass, so run it directly.
+      - run: docker run -d --name nats -p 4222:4222 nats:2.10 -js
+      - run: pip install -e "apps/api[dev]"
+      - run: cd apps/api && DATABASE_URL=$MIGRATION_DATABASE_URL alembic upgrade head
+      - run: apps/api/scripts/fullstack.sh up
+      - run: cd apps/api && python -m pytest tests/fullstack -v
+      - if: always()
+        run: apps/api/scripts/fullstack.sh down
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with: {name: fullstack-logs, path: /tmp/jobwatch-fullstack/*.log, retention-days: 7}

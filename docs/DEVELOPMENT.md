@@ -526,3 +526,54 @@ The page e2e test now counts API calls per path and fails above 3 in the settle 
   reads were missed. It now scans the route table in both directions. R4's reads gained models
   (`SignalDestinationOut`, `SignalDeliveryOut`, `SignalSchemaOut`) and contract coverage; **16
   detail reads remain unmodelled**, listed in the test as generated from the route table.
+
+## R17 — the whole product, end to end
+
+Every earlier suite tested a piece. Nothing proved that a heartbeat arriving at ingest ends up as a
+webhook on the customer's endpoint. R17 does, on real processes. 399 backend tests + 6 full-chain.
+
+- `apps/api/scripts/fullstack.sh up|down|status` starts API, ingest, exec-processor,
+  schedule-generator, reconciler, rule-engine, outbound-exporter and the Celery notifier —
+  the same entrypoints as `infra/docker/docker-compose.yml`, service for service — over real
+  Postgres, NATS JetStream and Redis. Logs in `/tmp/jobwatch-fullstack/`.
+- `tests/fullstack/test_alert_chain.py` (`JOBWATCH_FULLSTACK=1`, ~3 min) drives everything through
+  public HTTP: slots materialise without being asked; a success heartbeat makes the job healthy; a
+  failure reaches a webhook receiver; an incident opens; and with **no heartbeat at all** the
+  reconciler flags the missed slot and the alert still arrives. Timeouts dump job status, recent
+  executions and slots, which is what diagnosed the bug below.
+- `.github/workflows/fullstack.yml` runs it nightly, on demand, and on PRs touching the alert path.
+
+### Production bug: a failure after a success was silently ignored
+The first full-chain run sent success then fail 360 ms apart; the job stayed green with no alert.
+`attach_slot` binds only to an *open* slot, so once a success settled the slot, a later run in the
+same period — a manual rerun, a wrapper retry — bound to nothing or to an older slot. State was
+derived from the latest settled slot by `scheduled_for`, so that failure was recorded and then
+ignored. The mirror case was broken too: a failure then a successful retry stayed failing.
+
+`job_state.recompute_state` now takes the last and previous outcome from the **executions
+timeline**, ordered by `COALESCE(agent_ts_end, server_received_ts)` so a delayed delivery cannot
+override a newer outcome. That is complete because the reconciler writes a `missed` execution per
+missed slot and flips runs to `timeout`. Slots still drive LATE and missed detection.
+`consecutive_failures` uses the same timeline. Two regression tests in `test_slot_lifecycle.py`
+fail on the old derivation with the exact symptom and pass on the new one at several positions in
+the minute.
+
+### Test isolation fix
+The NATS pipeline tests assumed empty streams; the full-chain run left backlog and made `drain()`
+counts wrong. The fixture now purges CS_EXEC and CS_STATUS. **Do not run the integration suite
+while `fullstack.sh` is up** — the purge would drop the stack's messages.
+
+### Honest notes
+- `test_overdue_slots_become_missed_and_job_failing` failed once in a full-suite run and did not
+  reproduce in 22 targeted runs across the */5 cycle or a full rerun. It is time-position sensitive
+  (R9 already deflaked it once). Recorded, not fixed.
+- This is processes, not containers. It proves the chain; it does not prove the images, the compose
+  networking or the Helm chart. That still needs a real host.
+- Not in the chain: the Go agents (R1), Keycloak login, Stripe, the web UI against the real API.
+
+### Security finding, not yet fixed: webhook SSRF
+There is no destination check on webhook channels or signal destinations. A tenant can point one at
+`http://169.254.169.254/…` (cloud metadata) or any internal HTTP service, and the notifier will POST
+to it from inside the cluster. For a multi-tenant SaaS this must be blocked; for a self-hosted
+single-tenant deploy, internal webhooks are legitimate. Needs a mode switch (block private/link-local
+by default in SaaS, allow in self-hosted) plus DNS-rebinding-safe resolution at send time.

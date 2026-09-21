@@ -143,3 +143,66 @@ def test_paused_job_slots_are_skipped_not_missed(make_job, org):
     states = {x.state for x in _slots(j) if x.scheduled_for < now() - timedelta(seconds=60)}
     assert states == {"skipped"}
     assert _job(j).job_state == "unknown" and _job(j).unknown_reason == "paused"
+
+
+def _run(s, org, job, kind, exit_code=None, offset_s=0.0):
+    """One complete run (start + terminal event) through the real processor."""
+    from cronsentinel.processor import process
+    eid = f"it-{uuid.uuid4().hex}"
+    t = (now() + timedelta(seconds=offset_s)).isoformat()
+    base = {"org_id": org, "job_id": job, "execution_id": eid, "agent_ts": t, "server_ts": t, "meta": {}}
+    process(s, {**base, "kind": "start", "sequence": 0})
+    # process() recomputes state itself and returns the change it emitted onto CS_STATUS — that
+    # return value is what the rule engine would alert on.
+    return process(s, {**base, "kind": kind, "sequence": 1, "duration_ms": 500, "exit_code": exit_code})
+
+
+def test_failure_after_success_in_the_same_slot_is_not_ignored(make_job, org):
+    """R17 regression. Found by the full-stack test: a success settles the slot, a second run in the
+    same period (manual rerun, wrapper retry) fails, and attach_slot finds no open slot to bind it
+    to. State used to be derived from slots only, so the failure was recorded and then ignored —
+    job green, no status change, no alert."""
+    from cronsentinel.db import system_session
+    from cronsentinel.workers import reconciler
+    from cronsentinel.workers.schedule_generator import tick
+    j = make_job(schedule="* * * * *", grace_s=120, expected_runtime_s=60, created_ago=timedelta(minutes=2))
+    with system_session() as s:
+        tick(s)
+    with system_session() as s:
+        _run(s, org["id"], j, "success", 0)
+    with system_session() as s:
+        reconciler.recompute_state(s, j, org["id"])
+    assert _job(j).job_state == "ok"
+
+    with system_session() as s:
+        # Where the failure binds depends on which slot windows are open at this instant: no slot at
+        # all, or an *older* slot still inside its grace. Both broke the old derivation — it ranked
+        # settled slots by scheduled_for, so the success's newer slot won either way. The invariant
+        # is the outcome, so that is what is asserted.
+        change = _run(s, org["id"], j, "fail", 2, offset_s=1)
+    jb = _job(j)
+    assert jb.job_state == "failing", f"a failed run after a success left the job {jb.job_state}"
+    assert jb.status == "failed" and jb.consecutive_failures == 1
+    assert change and change["new_state"] == "failing", "no status change emitted, so no alert would fire"
+
+
+def test_success_after_failure_in_the_same_slot_recovers(make_job, org):
+    """The mirror case: a failed run then a successful retry within one period must recover,
+    not stay failing because the slot was settled 'failed' first."""
+    from cronsentinel.db import system_session
+    from cronsentinel.workers import reconciler
+    from cronsentinel.workers.schedule_generator import tick
+    j = make_job(schedule="* * * * *", grace_s=120, expected_runtime_s=60, created_ago=timedelta(minutes=2))
+    with system_session() as s:
+        tick(s)
+    with system_session() as s:
+        _run(s, org["id"], j, "fail", 1)
+    with system_session() as s:
+        reconciler.recompute_state(s, j, org["id"])
+    assert _job(j).job_state == "failing"
+    with system_session() as s:
+        _run(s, org["id"], j, "success", 0, offset_s=1)
+    with system_session() as s:
+        reconciler.recompute_state(s, j, org["id"])
+    jb = _job(j)
+    assert jb.job_state == "ok" and jb.status == "recovered" and jb.consecutive_failures == 0
