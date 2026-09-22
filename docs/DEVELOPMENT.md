@@ -786,3 +786,35 @@ right subject and header. Mutation-checked: reverting to the old stub fails exac
 `test_destination` (the "send test" button) now supports nats too, with an honest caveat: NATS core
 pub/sub has no delivery acknowledgement beyond the server accepting the publish — `ok: true` means
 reachable and accepted, not that a subscriber received it, same limit noted in the response.
+
+## R31 — multi-replica ingest heartbeat, actually tested
+
+R26 gave ingest its own heartbeat and claimed "with several replicas the row is shared — any live
+replica keeps it fresh" — reasoned at the time, never tested, since the fullstack stack has only
+ever run one ingest process. `tests/fullstack/test_ingest_multi_replica.py` spins up a second real
+ingest process (its own uvicorn, its own port) alongside the fullstack-managed one and proves it:
+
+- Both replicas write the same shared `platform_heartbeats` row (by service name, not per-instance
+  — that's the design; the reconciler asks "was ANY ingest process watching", not "was this one").
+- Kill the extra replica, wait past one heartbeat interval: the row stays fresh purely from the
+  surviving fullstack-managed replica, and a slot whose deadline falls in that window is still
+  correctly judged `missed`, not `unobserved` — one dead replica never blinds the platform.
+
+Mutation-checked properly (the first attempt gave a false pass from a stale pre-mutation row still
+under threshold by coincidence — cleared `platform_heartbeats` before re-running): swapping the
+heartbeat key to one row per process (`ingest-{pid}` instead of the shared `ingest`) makes the test
+fail, confirming it actually exercises the sharing behavior rather than passing regardless.
+
+The reverse case — every ingest replica silent — was verified manually against this same stack:
+two independent replicas, kill both, wait past the 60 s gap threshold (`GAP_MULTIPLIER` × 
+`INGEST_HEARTBEAT_S`). A slot whose deadline fell in that window came back `unobserved`, exactly as
+designed. Not automated: it would require killing the fullstack stack's only ingest process,
+taking down infrastructure every other fullstack test in a shared run depends on. The automated
+test covers the resilience direction (the one that matters for uptime); the manual run is the
+evidence for the blindness direction (the one that matters for alert correctness), recorded here
+rather than encoded as a destructive CI step.
+
+This closes the last item from the earlier open-items list: CI-as-non-superuser (R28), self-service
+org export/deletion (R29), the nats outbound destination (R30), and multi-replica ingest heartbeat
+semantics (R31) are all now implemented, tested, and verified against real infrastructure — not
+just described.
