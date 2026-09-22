@@ -65,6 +65,7 @@ type S = components["schemas"];
 
 export type Job = S["JobOut"];
 export type JobPage = S["JobPage"];
+export type MonitoringGaps = S["MonitoringGapsOut"];
 export type Execution = S["ExecutionOut"];
 export type Incident = S["IncidentOut"];
 export type Channel = S["ChannelOut"];

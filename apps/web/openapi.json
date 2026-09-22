@@ -6335,6 +6335,87 @@
         }
       }
     },
+    "/api/v1/platform/monitoring-gaps": {
+      "get": {
+        "tags": [
+          "platform"
+        ],
+        "summary": "Monitoring Gaps",
+        "operationId": "monitoring_gaps_api_v1_platform_monitoring_gaps_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "x-org-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Org-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MonitoringGapsOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/healthz": {
       "get": {
         "summary": "Healthz",
@@ -7908,6 +7989,63 @@
           "ends_at"
         ],
         "title": "MaintenanceIn"
+      },
+      "MonitoringGapOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "service": {
+            "type": "string",
+            "title": "Service"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At"
+          },
+          "ended_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Ended At"
+          },
+          "slots_unobserved": {
+            "type": "integer",
+            "title": "Slots Unobserved"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "service",
+          "started_at",
+          "ended_at",
+          "slots_unobserved"
+        ],
+        "title": "MonitoringGapOut",
+        "description": "R25: a period when the platform itself was not watching. Slots whose deadline fell inside it\nare `unobserved`, never `missed`, and never alert."
+      },
+      "MonitoringGapsOut": {
+        "properties": {
+          "gaps": {
+            "items": {
+              "$ref": "#/components/schemas/MonitoringGapOut"
+            },
+            "type": "array",
+            "title": "Gaps"
+          },
+          "unobserved_slots_30d": {
+            "type": "integer",
+            "title": "Unobserved Slots 30D"
+          }
+        },
+        "type": "object",
+        "required": [
+          "gaps",
+          "unobserved_slots_30d"
+        ],
+        "title": "MonitoringGapsOut"
       },
       "NamedMetric": {
         "properties": {

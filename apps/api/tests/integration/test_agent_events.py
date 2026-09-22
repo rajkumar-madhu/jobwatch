@@ -86,7 +86,10 @@ def test_progress_events_are_stored(ingest, agent):
 
 
 def test_wrong_agent_key_is_rejected(ingest, agent):
-    r = ingest.post("/agent/v1/events", json={"events": []}, headers={"X-Agent-Id": agent["id"], "X-Agent-Key": agent["key"][:-1] + "0"})
+    # R25: was key[:-1] + "0" — the key is hex, so 1 run in 16 the last char already is "0" and the
+    # "wrong" key equalled the right one (a 200 that looked like an auth hole in the full suite).
+    flipped = "1" if agent["key"][-1] == "0" else "0"
+    r = ingest.post("/agent/v1/events", json={"events": []}, headers={"X-Agent-Id": agent["id"], "X-Agent-Key": agent["key"][:-1] + flipped})
     assert r.status_code == 401
 
 

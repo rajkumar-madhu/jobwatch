@@ -27,6 +27,7 @@ from .routers import (
     logs,
     org,
     overview,
+    platform,
     status_pages,
     topology,
 )
@@ -50,7 +51,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="JobWatch API", version="0.1.0", lifespan=lifespan, docs_url="/docs", openapi_url="/openapi.json")
 app.add_middleware(CORSMiddleware, allow_origins=[settings.web_public_url], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
-for r in (jobs.router, executions.router, org.router, overview.router, alerting.router, incidents.router, agents.admin, logs.router, authr.router, status_pages.router, status_pages.public, k8s.router, topology.router, analytics.router, copilot.router, billing.router, integrations.router):
+for r in (jobs.router, executions.router, org.router, overview.router, alerting.router, incidents.router, agents.admin, logs.router, authr.router, status_pages.router, status_pages.public, k8s.router, topology.router, analytics.router, copilot.router, billing.router, integrations.router, platform.router):
     app.include_router(r)
 
 

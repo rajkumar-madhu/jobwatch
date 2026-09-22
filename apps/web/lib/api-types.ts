@@ -1050,6 +1050,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/platform/monitoring-gaps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Monitoring Gaps */
+        get: operations["monitoring_gaps_api_v1_platform_monitoring_gaps_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/healthz": {
         parameters: {
             query?: never;
@@ -1680,6 +1697,36 @@ export interface components {
             ends_at: string;
             /** Rrule */
             rrule?: string | null;
+        };
+        /**
+         * MonitoringGapOut
+         * @description R25: a period when the platform itself was not watching. Slots whose deadline fell inside it
+         *     are `unobserved`, never `missed`, and never alert.
+         */
+        MonitoringGapOut: {
+            /** Id */
+            id: number;
+            /** Service */
+            service: string;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /**
+             * Ended At
+             * Format: date-time
+             */
+            ended_at: string;
+            /** Slots Unobserved */
+            slots_unobserved: number;
+        };
+        /** MonitoringGapsOut */
+        MonitoringGapsOut: {
+            /** Gaps */
+            gaps: components["schemas"]["MonitoringGapOut"][];
+            /** Unobserved Slots 30D */
+            unobserved_slots_30d: number;
         };
         /** NamedMetric */
         NamedMetric: {
@@ -4612,6 +4659,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SignalDeliveryOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    monitoring_gaps_api_v1_platform_monitoring_gaps_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+                "x-org-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MonitoringGapsOut"];
                 };
             };
             /** @description Validation Error */

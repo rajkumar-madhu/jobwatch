@@ -37,9 +37,10 @@ class SlotState(StrEnum):
     LATE = "late"
     MISSED = "missed"
     SKIPPED = "skipped"   # inside a maintenance window, or job paused when the slot came due
+    UNOBSERVED = "unobserved"  # R25: came due inside a monitoring gap on our side; never alerts
 
 
-TERMINAL = {SlotState.SUCCEEDED, SlotState.FAILED, SlotState.MISSED, SlotState.SKIPPED}
+TERMINAL = {SlotState.SUCCEEDED, SlotState.FAILED, SlotState.MISSED, SlotState.SKIPPED, SlotState.UNOBSERVED}
 BAD_SLOTS = {SlotState.FAILED, SlotState.MISSED}
 
 # Alerting only ever fires on these transitions; UNKNOWN is deliberately absent.

@@ -667,3 +667,33 @@ which would have silently done nothing on a managed-Postgres (non-superuser) own
 
 Noted, not fixed: 348 orphaned `execution_logs` rows in the dev DB from test fixtures that delete
 orgs without `purge_org()` — test hygiene, not a product path (the CLI purges first).
+
+## R25 — monitoring gaps: our outage never pages a customer
+
+Migration 0014. After a schedule-generator outage every affected job backfilled up to two days of
+slots and the reconciler marked them all missed — an alert storm for a fault on our side. Two
+mechanisms, both fixed in the reconciler before any missed judgement:
+
+1. **Retro-match.** Executions that arrived while no slot existed were recorded unattached and the
+   backfilled slot then looked empty. `retro_match()` binds them (same 90 s / deadline window as the
+   live path, one execution per slot, nearest start wins).
+2. **`unobserved`.** Whatever is still empty inside a period the platform was not watching becomes
+   `unobserved` — terminal, no synthetic execution, no alert, job state untouched. Never `missed`:
+   nobody was there to see it.
+
+Gap detection: `workers/platform_health.heartbeat()` runs every generator and reconciler pass; a
+break > 3× the interval writes `monitoring_gaps`. The reconciler also treats a *currently silent*
+generator as an open gap, so recovery order does not matter. `GET /api/v1/platform/monitoring-gaps`
+exposes gaps (global) and the tenant's own unobserved count; the overview shows a banner.
+
+Measured on the full stack — 45-minute generator outage, every-minute job, 3 real runs reported
+during the outage: before, 46 missed alerts; after, 3 runs recognised, 41 unobserved, 2 genuine
+misses (slots that came due after recovery with no run).
+
+**Trade-off, chosen deliberately:** while the generator is silent, the reconciler will not call any
+overdue slot missed even if ingest was healthy and the job truly did not run. A real miss during
+our outage is deferred to `unobserved` rather than risk a false page. Revisit if ingest gets its own
+heartbeat, which would let the predicate distinguish "we could not see" from "we did not schedule".
+
+Also fixed: `test_wrong_agent_key_is_rejected` flipped the key's last hex char to "0"; one run in
+16 it already was "0" and the "wrong" key was the right key — a 200 that read like an auth hole.

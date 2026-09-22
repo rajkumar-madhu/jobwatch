@@ -31,6 +31,7 @@ COVERED = {
     "/api/v1/status-pages": "/api/v1/status-pages",
     "/api/v1/workspaces": "/api/v1/workspaces",
     "/api/v1/analytics/overview": "/api/v1/analytics/overview",
+    "/api/v1/platform/monitoring-gaps": "/api/v1/platform/monitoring-gaps",   # R25
     "/api/v1/dependencies": "/api/v1/dependencies",
     # R15 additions
     "/api/v1/agents": "/api/v1/agents",

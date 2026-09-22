@@ -382,3 +382,18 @@ class SignalSchemaOut(BaseModel):
     example: dict
 
     model_config = {"populate_by_name": True}
+
+
+class MonitoringGapOut(BaseModel):
+    """R25: a period when the platform itself was not watching. Slots whose deadline fell inside it
+    are `unobserved`, never `missed`, and never alert."""
+    id: int
+    service: str
+    started_at: datetime
+    ended_at: datetime
+    slots_unobserved: int
+
+
+class MonitoringGapsOut(BaseModel):
+    gaps: list[MonitoringGapOut]
+    unobserved_slots_30d: int   # for this organisation

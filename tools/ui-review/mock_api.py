@@ -40,6 +40,8 @@ INC = [{"org_id": ORG, "id": "inc1", "severity": "high", "status": "open", "titl
 
 @app.get("/api/v1/analytics/overview")
 def ov(): return {"total_jobs": 8, "by_status": {"healthy": 3, "failed": 1, "missed": 1, "late": 1, "running": 1, "recovered": 1}, "executions_today": 146, "success_rate_today": 94.52, "top_slowest_7d": [{"name": "nightly-database-backup", "p95_ms": 3120000}, {"name": "mongodb-backup", "p95_ms": 712000}, {"name": "customer-report-generator", "p95_ms": 640000}], "top_failing_7d": [{"name": "customer-report-generator", "failures": 3}, {"name": "market-data-import", "failures": 2}], "mttd_min": 1.4, "mttr_min": 42.5}
+@app.get("/api/v1/platform/monitoring-gaps")
+def gaps(): return {"gaps": [{"id": 1, "service": "schedule-generator", "started_at": "2026-09-20T02:10:00Z", "ended_at": "2026-09-20T02:52:00Z", "slots_unobserved": 14}], "unobserved_slots_30d": 14}
 @app.get("/api/v1/jobs")
 def jobs(status: str | None = None, limit: int = 50): return {"items": [j for j in JOBS if not status or j["status"] == status], "next_cursor": None}
 @app.get("/api/v1/jobs/{jid}")

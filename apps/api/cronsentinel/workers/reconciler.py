@@ -21,6 +21,7 @@ from .. import events
 from ..config import settings
 from ..db import system_session
 from ..job_state import recompute_state  # single source of truth for the four-state
+from .platform_health import GAP_MULTIPLIER, IN_GAP_SQL, heartbeat
 
 log = structlog.get_logger()
 
@@ -48,10 +49,59 @@ def _mark_late(s) -> list[tuple]:
         RETURNING job_id, org_id""")).all()
 
 
+def retro_match(s) -> list[tuple]:
+    """R25: bind unattached terminal executions to still-open slots. Executions that arrived while
+    no slot existed (generator outage, job just created with a past first slot) were recorded with
+    expected_run_id NULL; without this they look like misses once the slot is backfilled. Same
+    window as the live path (attach_slot): start within [scheduled_for - 90 s, deadline]. One
+    execution per slot, nearest start wins."""
+    return s.execute(text("""
+        WITH cand AS (
+            SELECT DISTINCT ON (er.id) er.id AS er_id, e.id AS exec_id, e.status, er.job_id, er.org_id
+            FROM expected_runs er
+            JOIN executions e ON e.job_id = er.job_id AND e.org_id = er.org_id AND e.expected_run_id IS NULL
+                 AND e.status IN ('success','failed','timeout')
+                 AND COALESCE(e.agent_ts_start, e.scheduled_ts, e.server_received_ts)
+                     BETWEEN er.scheduled_for - interval '90 seconds' AND er.deadline
+            WHERE er.state IN ('pending','late') AND er.execution_id IS NULL
+            ORDER BY er.id, abs(EXTRACT(EPOCH FROM (COALESCE(e.agent_ts_start, e.scheduled_ts, e.server_received_ts) - er.scheduled_for)))),
+        one AS (SELECT DISTINCT ON (exec_id) * FROM cand ORDER BY exec_id, er_id),   -- an execution settles at most one slot
+        upd AS (
+            UPDATE expected_runs er SET
+                state = CASE WHEN one.status = 'success' THEN 'succeeded' ELSE 'failed' END::expected_run_state,
+                execution_id = one.exec_id, matched_at = now(), settled_at = now()
+            FROM one WHERE er.id = one.er_id RETURNING er.id, one.exec_id, er.job_id, er.org_id),
+        ex AS (UPDATE executions e SET expected_run_id = upd.id FROM upd WHERE e.id = upd.exec_id)
+        SELECT job_id, org_id FROM upd""")).all()
+
+
+def _mark_unobserved(s) -> list[tuple]:
+    """R25: overdue empty slots inside a monitoring gap are unobserved, not missed. No synthetic
+    execution and no alert: nobody was watching, so nothing was observed either way."""
+    rows = s.execute(text(f"""
+        WITH u AS (
+            UPDATE expected_runs er SET state='unobserved', settled_at=now()
+            WHERE er.state IN ('pending','late') AND er.execution_id IS NULL AND er.deadline < now()
+              AND ({IN_GAP_SQL})
+            RETURNING er.id, er.job_id, er.org_id, er.deadline),
+        cnt AS (
+            UPDATE monitoring_gaps g SET slots_unobserved = g.slots_unobserved + c.n
+            FROM (SELECT g2.id, count(*) AS n FROM u JOIN monitoring_gaps g2
+                    ON u.deadline >= g2.started_at AND u.deadline < g2.ended_at GROUP BY g2.id) c
+            WHERE g.id = c.id)
+        SELECT job_id, org_id FROM u"""),
+        {"self_service": "reconciler", "thr_s": settings.reconciler_interval_s * GAP_MULTIPLIER}).all()
+    if rows:
+        log.warning("slots marked unobserved (monitoring gap)", slots=len(rows))
+    return rows
+
+
 def _mark_missed(s) -> list[tuple]:
     # R19/R20: one statement. The synthetic execution rows (history, SLA and the run strip show the
     # gap) used to be inserted one round-trip per slot — 17,712 of them for a 30-minute outage at
     # 10k jobs, inside the same transaction as everything else.
+    # R25: runs after retro_match and _mark_unobserved, so only genuinely watched, genuinely empty
+    # slots get here.
     return s.execute(text("""
         WITH m AS (
             UPDATE expected_runs SET state='missed', settled_at=now()
@@ -84,9 +134,12 @@ def settle(s) -> set[tuple]:
     """Phase 1: settle slots (set-based UPDATEs on expected_runs; no job-row locks). Returns the
     (job_id, org_id) pairs that need a state pass."""
     touched: set[tuple] = set()
+    heartbeat(s, "reconciler", settings.reconciler_interval_s)   # R25: records our own gaps
     skipped = _settle_maintenance(s)
     for r in skipped: touched.add((r.job_id, r.org_id))
+    for r in retro_match(s): touched.add((r.job_id, r.org_id))   # R25: before any late/missed call
     for r in _mark_late(s): touched.add((r.job_id, r.org_id))
+    for r in _mark_unobserved(s): touched.add((r.job_id, r.org_id))
     for r in _mark_missed(s): touched.add((r.job_id, r.org_id))
     for r in _mark_timeouts(s): touched.add((r.job_id, r.org_id))
     # jobs whose agent just went quiet, or came back, also need a state pass
