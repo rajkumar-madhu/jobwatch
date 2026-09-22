@@ -188,6 +188,33 @@ bytes (`octet_length`); the old one counted characters. Tests assert the meter e
 recount after inserts, conflicts, updates, deletes, retention and purged orgs. One real bug caught
 on the way: a log-less org made the metering statement insert NULL and fail for every org.
 
+## R27 — the /analytics/overview outlier, diagnosed
+
+R19/R24 both saw one much-slower-than-usual request among many for `/analytics/overview` and
+recorded it as an unexplained cold-start guess. Diagnosed now (`scripts/diagnose_overview_outlier.py`).
+
+Ruled out first: the endpoint's slowest sub-query (7-day p95 duration by job) is correctly indexed
+and takes 20-30ms warm — `EXPLAIN (ANALYZE, BUFFERS)` shows an all-`shared hit` plan, no disk reads.
+Run alone in a tight loop with nothing else active, 40 reps never exceed 28ms.
+
+Run against the live full-stack instead (API + generator + reconciler + celery, as production
+actually runs it) with per-request timestamps, spikes appeared in bursts, and those bursts line up
+exactly with entries in the worker logs at the same second: the reconciler's state-recompute pass
+(`reconciled changes=1369 jobs=1400 took_s=45.38`) and a celery outbound-delivery retry burst.
+
+Conclusion: this is CPU contention for the test box's **one vCPU** between the API process and the
+background workers, not a query, index, or plan problem — nothing to fix in `/analytics/overview`
+itself. Consistent with this doc's own opening caveat: *numbers are a floor, not a capacity plan*.
+On a box with API and workers on separate cores (any real deployment), this does not occur. The
+magnitude here (100-120ms) is smaller than the originally reported outlier because this box's
+reconciler pass was smaller (1,400 jobs, not R19/R24's larger load runs) — the mechanism is the
+same, and a bigger concurrent pass would compound it further.
+
+**Not a fix, but worth having:** if this ever needs bounding without more hardware, the reconciler
+could yield the CPU between its per-job recompute calls (`asyncio.sleep(0)` inside the batch loop),
+trading a slower reconciler pass for a steadier API tail latency. Not implemented — no evidence yet
+that anyone is hitting this outside a 1-vCPU test box.
+
 ## Open findings (not fixed)
 
 - **`/analytics/overview` shows one ~4 s request out of 20** in two separate runs (p95 = max), apparently
