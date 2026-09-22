@@ -755,3 +755,34 @@ body would delete the org every other test in that sweep depends on. Exercised f
 Also cleared a genuinely stale `monitoring_gaps` row left in the dev DB from earlier R25/26 manual
 verification — it was silently reclassifying unrelated tests' overdue slots as `unobserved`. Test
 hygiene, not a product bug; same class as the previously-noted orphaned `execution_logs` rows.
+
+## R30 — the nats outbound destination kind, implemented
+
+`outbound/deliver.py` had `raise RuntimeError("nats destination not implemented")` since R4 — every
+tenant with a nats destination had every delivery fail, retry to exhaustion (MAX_ATTEMPTS), and
+auto-disable. Two blockers, both fixed:
+
+1. **The save path itself couldn't accept a nats:// URL.** `DestinationIn.url` was pydantic's
+   `HttpUrl`, which rejects any non-http(s) scheme before the handler even runs. Now a plain `str`,
+   validated by kind: `netguard.check_url` (http/https) for webhook, a new `netguard.check_nats_url`
+   (nats/tls, default port 4222, same private/loopback/link-local/CGNAT policy) for nats.
+2. **Delivery itself.** `_publish_nats` opens one short-lived `nats.py` connection per delivery
+   (same shape as `_post_webhook`'s one POST per delivery — no persistent async client to keep
+   alive alongside the sync Celery worker pool), resolves and validates the host at connect time
+   via `netguard.resolve_nats_host` (the DNS-rebinding-safe step `_GuardedBackend` already does for
+   HTTP), publishes to `{subject_prefix}.{event_type}` with a `Nats-Msg-Id` header carrying the
+   signal id, and flushes to confirm the server accepted it. Wrapped in `asyncio.run()` — safe
+   inside a real Celery worker (which has no event loop of its own); the test that exercises the
+   real code path runs the Celery task on `asyncio.to_thread` for exactly that reason.
+
+Config shape: `{url, subject_prefix, token}` — `token` is optional NATS token auth only; user/
+password and NKey/JWT auth are not supported yet (documented gap, not silently partial — the
+webhook path is similarly single-mechanism, HMAC-secret only).
+
+Verified against the sandbox's own NATS instance end-to-end: create a destination, subscribe as a
+real client, trigger delivery through the actual Celery task, assert the message arrives with the
+right subject and header. Mutation-checked: reverting to the old stub fails exactly that test.
+
+`test_destination` (the "send test" button) now supports nats too, with an honest caveat: NATS core
+pub/sub has no delivery acknowledgement beyond the server accepting the publish — `ok: true` means
+reachable and accepted, not that a subscriber received it, same limit noted in the response.

@@ -354,8 +354,10 @@ class SignalDestinationOut(BaseModel):
     sent_24h: int = 0
     failed_24h: int = 0
     url: str | None = None
-    # Never the secret itself — only whether one is configured.
     has_secret: bool = False
+    subject_prefix: str | None = None   # nats destinations only
+    has_token: bool = False             # nats destinations only
+    # Never the secret itself — only whether one is configured.
 
 
 class SignalDeliveryOut(BaseModel):

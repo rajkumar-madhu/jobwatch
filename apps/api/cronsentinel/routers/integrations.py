@@ -6,7 +6,7 @@ import httpx
 
 from .. import netguard
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from ..auth import Principal, audit, current_principal, require_role
@@ -22,12 +22,17 @@ router = APIRouter(prefix="/api/v1/integrations", tags=["integrations"])
 class DestinationIn(BaseModel):
     name: str
     kind: str = "webhook"
-    url: HttpUrl
+    url: str
     secret: str | None = Field(None, min_length=16, max_length=256)
     headers: dict[str, str] = {}
+    subject_prefix: str | None = Field(None, max_length=200)   # nats only
+    token: str | None = Field(None, max_length=500)            # nats only; no user/password auth yet
     event_types: list[str] = []
     workspace_ids: list[UUID] = []
     enabled: bool = True
+
+
+NATS_SUBJECT_RE = __import__("re").compile(r"^[^\s.*>]+(\.[^\s.*>]+)*$")
 
 
 def _check(body: DestinationIn):
@@ -36,11 +41,12 @@ def _check(body: DestinationIn):
     for t in body.event_types:
         try: schema.validate_event_type(t)
         except ValueError as e: raise HTTPException(400, str(e))
-    host = body.url.host or ""
-    # Data boundary: refuse to point a tenant's telemetry at link-local / loopback — SSRF and
-    # "accidentally exported to the metadata service" both start here.
-    if host in ("localhost", "127.0.0.1", "169.254.169.254", "::1") or host.endswith(".internal"):
-        raise HTTPException(400, "destination host not allowed")
+    if body.kind == "nats":
+        if not body.subject_prefix:
+            raise HTTPException(400, "subject_prefix is required for a nats destination")
+        if not NATS_SUBJECT_RE.match(body.subject_prefix):
+            raise HTTPException(400, "subject_prefix must not contain whitespace, '.', '*' or '>' as a token boundary issue — "
+                                      "use dot-separated tokens with no wildcards, e.g. 'acme.signals'")
 
 
 @router.get("/schema", response_model=SignalSchemaOut, response_model_by_alias=True)
@@ -67,18 +73,24 @@ def list_destinations(p: Principal = Depends(current_principal)):
             d = dict(r._mapping)
             cfg = decrypt_json(s.execute(text("SELECT config_enc FROM signal_destinations WHERE id=:id"), {"id": r.id}).scalar())
             d["url"] = cfg.get("url"); d["has_secret"] = bool(cfg.get("secret"))
+            if r.kind == "nats":
+                d["subject_prefix"] = cfg.get("subject_prefix"); d["has_token"] = bool(cfg.get("token"))
             out.append(d)
         return out
 
 
 @router.post("/destinations", status_code=201)
 def create_destination(body: DestinationIn, request: Request, p: Principal = Depends(require_role("devops"))):
-    try:  # R18: refuse internal targets and dangerous headers when saved, with a clear reason
-        netguard.check_url(str(body.url)); netguard.check_headers(body.headers)
+    try:  # R18/R30: refuse internal targets and dangerous headers when saved, with a clear reason
+        if body.kind == "nats":
+            netguard.check_nats_url(body.url)
+        else:
+            netguard.check_url(body.url); netguard.check_headers(body.headers)
     except netguard.BlockedDestination as e:
         raise HTTPException(400, str(e))
     _check(body)
-    cfg = {"url": str(body.url), "secret": body.secret, "headers": body.headers}
+    cfg = ({"url": body.url, "subject_prefix": body.subject_prefix, "token": body.token} if body.kind == "nats"
+           else {"url": body.url, "secret": body.secret, "headers": body.headers})
     with tenant_session(p.org_id) as s:
         r = s.execute(text("""INSERT INTO signal_destinations (org_id, name, kind, config_enc, event_types, workspace_ids, enabled)
             VALUES (:o, :n, :k, :c, :et, :ws, :en) RETURNING id"""),
@@ -90,16 +102,22 @@ def create_destination(body: DestinationIn, request: Request, p: Principal = Dep
 
 @router.put("/destinations/{dest_id}")
 def update_destination(dest_id: UUID, body: DestinationIn, request: Request, p: Principal = Depends(require_role("devops"))):
-    try:  # R18: refuse internal targets and dangerous headers when saved, with a clear reason
-        netguard.check_url(str(body.url)); netguard.check_headers(body.headers)
+    try:  # R18/R30: refuse internal targets and dangerous headers when saved, with a clear reason
+        if body.kind == "nats":
+            netguard.check_nats_url(body.url)
+        else:
+            netguard.check_url(body.url); netguard.check_headers(body.headers)
     except netguard.BlockedDestination as e:
         raise HTTPException(400, str(e))
     _check(body)
     with tenant_session(p.org_id) as s:
-        cfg = {"url": str(body.url), "secret": body.secret, "headers": body.headers}
-        if body.secret is None:  # keep existing secret when the form omits it
-            cur = s.execute(text("SELECT config_enc FROM signal_destinations WHERE id=:id"), {"id": str(dest_id)}).scalar()
-            if cur: cfg["secret"] = decrypt_json(cur).get("secret")
+        cfg = ({"url": body.url, "subject_prefix": body.subject_prefix, "token": body.token} if body.kind == "nats"
+               else {"url": body.url, "secret": body.secret, "headers": body.headers})
+        cur = s.execute(text("SELECT config_enc FROM signal_destinations WHERE id=:id"), {"id": str(dest_id)}).scalar()
+        if body.kind == "webhook" and body.secret is None and cur:  # keep existing secret when the form omits it
+            cfg["secret"] = decrypt_json(cur).get("secret")
+        if body.kind == "nats" and body.token is None and cur:      # same courtesy for the nats auth token
+            cfg["token"] = decrypt_json(cur).get("token")
         n = s.execute(text("""UPDATE signal_destinations SET name=:n, kind=:k, config_enc=:c, event_types=:et, workspace_ids=:ws, enabled=:en,
             consecutive_failures=0, disabled_reason=NULL, updated_at=now() WHERE id=:id"""),
             {"n": body.name, "k": body.kind, "c": encrypt_json(cfg), "et": body.event_types, "ws": [str(w) for w in body.workspace_ids],
@@ -118,25 +136,36 @@ def delete_destination(dest_id: UUID, request: Request, p: Principal = Depends(r
 
 @router.post("/destinations/{dest_id}/test")
 def test_destination(dest_id: UUID, p: Principal = Depends(require_role("devops"))):
-    """Synchronous test: sends a job.state_changed sample and reports the response code."""
+    """Synchronous test: sends a job.state_changed sample and reports the outcome."""
     with tenant_session(p.org_id) as s:
         row = s.execute(text("SELECT kind::text, config_enc FROM signal_destinations WHERE id=:id"), {"id": str(dest_id)}).first()
         if not row: raise HTTPException(404)
         cfg = decrypt_json(row.config_enc)
-    if row.kind != "webhook":
-        raise HTTPException(400, "test only supported for webhook destinations")
     sig = schema.from_jobstatus({"org_id": str(p.org_id), "job_id": "00000000-0000-0000-0000-000000000000", "new_state": "ok", "prev_state": "unknown",
                                  "new_status": "healthy", "prev_status": "unknown"}, {"name": "jobwatch-test", "kind": "heartbeat"})
     raw = json.dumps({**sig.envelope(), "test": True}, separators=(",", ":"), default=str).encode()
-    headers = {"Content-Type": "application/json", "X-JobWatch-Signal-Id": sig.signal_id, "X-JobWatch-Schema": "jobwatch.signal/1", **cfg.get("headers", {})}
-    if cfg.get("secret"): headers["X-JobWatch-Signature"] = sign(cfg["secret"], raw)
-    try:
-        r = netguard.post(cfg["url"], content=raw, headers=headers, timeout=10)
-        return {"status_code": r.status_code, "ok": r.status_code < 400}
-    except Exception as e:
-        # R18: never str(e). It carried internal addresses and distinguished refused/timeout/reset —
-        # enough to port-scan the cluster from the API pod one "send test" at a time.
-        return {"ok": False, "error": netguard.describe_failure(e)}
+    if row.kind == "webhook":
+        headers = {"Content-Type": "application/json", "X-JobWatch-Signal-Id": sig.signal_id, "X-JobWatch-Schema": "jobwatch.signal/1", **cfg.get("headers", {})}
+        if cfg.get("secret"): headers["X-JobWatch-Signature"] = sign(cfg["secret"], raw)
+        try:
+            r = netguard.post(cfg["url"], content=raw, headers=headers, timeout=10)
+            return {"status_code": r.status_code, "ok": r.status_code < 400}
+        except Exception as e:
+            # R18: never str(e). It carried internal addresses and distinguished refused/timeout/reset —
+            # enough to port-scan the cluster from the API pod one "send test" at a time.
+            return {"ok": False, "error": netguard.describe_failure(e)}
+    elif row.kind == "nats":
+        try:
+            from ..outbound.deliver import _publish_nats
+            _publish_nats(cfg, raw, sig.signal_id, "job.state_changed")
+            # R30: NATS core pub/sub has no delivery ack beyond the server accepting the publish
+            # (nc.flush(), inside _publish_nats) — "ok" here means reachable and accepted, not that
+            # a subscriber received it. Same honesty limit JetStream-less pub/sub always has.
+            return {"ok": True, "note": "published — NATS core has no delivery confirmation beyond the server accepting it"}
+        except Exception as e:
+            return {"ok": False, "error": netguard.describe_failure(e)}
+    else:
+        raise HTTPException(400, f"test not supported for kind {row.kind}")
 
 
 @router.get("/deliveries", response_model=list[SignalDeliveryOut])

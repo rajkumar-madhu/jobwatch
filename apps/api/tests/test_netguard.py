@@ -41,6 +41,62 @@ def test_config_time_accepts_public(monkeypatch):
     netguard.check_url("https://93.184.216.34/hook", resolve=False)
 
 
+# --- R30: check_nats_url / resolve_nats_host — same policy as check_url, adapted to nats/tls and
+# port 4222. Not parametrized off test_config_time_rejects: that list mixes in http-only schemes
+# (file://, gopher://, ftp://) that check_nats_url would reject for a different reason (wrong
+# scheme, not address class), so asserting the SAME exception type there wouldn't prove much.
+
+@pytest.mark.parametrize("url", [
+    "nats://169.254.169.254:4222/",
+    "nats://127.0.0.1:4222/", "tls://[::1]:4222/",
+    "nats://10.0.0.5:4222/", "nats://192.168.1.1:4222/",
+    "nats://localhost:4222/",
+    "http://example.com:4222/", "ftp://example.com/",   # right host, wrong scheme
+])
+def test_nats_config_time_rejects(url):
+    with pytest.raises(netguard.BlockedDestination):
+        netguard.check_nats_url(url)
+
+
+def test_nats_config_time_rejects_names_that_resolve_only_to_private_space(monkeypatch):
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: [(0, 0, 0, "", ("10.1.2.3", 4222))])
+    with pytest.raises(netguard.BlockedDestination, match="resolves only"):
+        netguard.check_nats_url("nats://broker.innocent-looking.example/")
+
+
+def test_nats_config_time_accepts_public(monkeypatch):
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: [(0, 0, 0, "", ("93.184.216.34", 4222))])
+    netguard.check_nats_url("nats://broker.example.com:4222/")
+
+
+def test_nats_config_time_defaults_the_port_to_4222(monkeypatch):
+    seen = {}
+    def fake_getaddrinfo(host, port, **k):
+        seen["port"] = port
+        return [(0, 0, 0, "", ("93.184.216.34", port))]
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+    netguard.check_nats_url("nats://broker.example.com/")   # no :port in the URL
+    assert seen["port"] == 4222
+
+
+def test_resolve_nats_host_swaps_in_the_validated_address(monkeypatch):
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: [(0, 0, 0, "", ("93.184.216.34", 4222))])
+    resolved = netguard.resolve_nats_host("nats://broker.example.com:4222/")
+    assert "93.184.216.34" in resolved and "broker.example.com" not in resolved
+
+
+def test_resolve_nats_host_blocks_a_name_that_resolves_only_to_private_space(monkeypatch):
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: [(0, 0, 0, "", ("10.1.2.3", 4222))])
+    with pytest.raises(netguard.BlockedDestination):
+        netguard.resolve_nats_host("nats://broker.innocent-looking.example:4222/")
+
+
+def test_self_hosted_mode_allows_a_private_nats_target(monkeypatch):
+    monkeypatch.setattr(settings, "outbound_allow_private", True)
+    netguard.check_nats_url("nats://10.0.0.5:4222/")
+    netguard.check_nats_url("nats://localhost:4222/")
+
+
 @pytest.mark.parametrize("header", ["Host", "metadata-flavor", "Metadata", "X-aws-ec2-metadata-token", "Transfer-Encoding"])
 def test_dangerous_headers_rejected(header):
     with pytest.raises(netguard.BlockedDestination):
