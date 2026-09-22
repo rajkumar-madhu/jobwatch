@@ -175,3 +175,24 @@ request it throttled ingest and gave anyone with a key prefix a cheap CPU-exhaus
 Hashes are unpeppered so rotating `SECRET_ENCRYPTION_KEY` does not revoke every key. Pre-R21 argon2
 hashes still verify and are rewritten on first successful use. There are no user passwords
 (Keycloak handles users); if one is ever introduced it must use argon2.
+
+
+## SECURITY DEFINER functions and FORCE RLS (R24)
+
+A definer function runs as its owner, and `FORCE ROW LEVEL SECURITY` applies RLS to the owner —
+unless the owner is a superuser. Every environment this project is tested in (sandbox, CI, default
+compose) has a superuser owner, so a wrongly-owned definer function works there and **silently
+does nothing** on managed Postgres, where the owner usually is not a superuser. Demonstrated with a
+non-superuser owner on a scratch table: a definer purge deleted 0 of 5 rows and returned success;
+owned by `jobwatch_system`, 5 of 5.
+
+That applied to `purge_org()` and `purge_job()` (tenant offboarding, job-delete cleanup) and the
+status-page prune trigger, all from R11. Migration 0013 re-owns every DML-only definer function to
+`jobwatch_system`. DDL functions (`ensure_month_partition`, `drop_partition_if_empty`) keep the
+table owner — `DROP` needs ownership, and they work on partitions directly, where the parent's RLS
+does not apply. `test_dml_definer_functions_are_owned_by_the_system_role` checks the ownership
+invariant for every current and future definer function, since the behaviour itself cannot be
+observed with a superuser owner.
+
+**Recommendation not implemented:** run CI's migrations as a non-superuser owner so this class of
+bug fails a test instead of relying on a structural check.

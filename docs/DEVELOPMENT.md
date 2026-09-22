@@ -656,3 +656,14 @@ retention delete: 3.6–4.9 s → 0.06 s). Migration 0012: `ensure_month_partiti
 stranded in the default partition instead of failing forever; `drop_partition_if_empty()` lets the
 system role reclaim emptied month partitions. Numbers and the trade-off (slower wall time) in
 `docs/LOADTEST.md`. Also re-ran the full chain owed from R22 (6/6).
+
+## R24 — usage metering; definer-function ownership
+
+Migration 0013: `execution_logs(org_id)` index; incremental storage metering via a trigger-fed
+ledger (6.0 s → 0.03 s); `FORCE` RLS on the new tables; DML-only `SECURITY DEFINER` functions
+re-owned by `jobwatch_system`. That last one fixes R11's `purge_org`/`purge_job`/status-page prune,
+which would have silently done nothing on a managed-Postgres (non-superuser) owner. Details in
+`docs/LOADTEST.md` and `docs/SECURITY.md`.
+
+Noted, not fixed: 348 orphaned `execution_logs` rows in the dev DB from test fixtures that delete
+orgs without `purge_org()` — test hygiene, not a product path (the CLI purges first).

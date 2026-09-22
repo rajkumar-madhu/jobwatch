@@ -53,7 +53,7 @@ USAGE_SQL = """
 INSERT INTO usage_records (org_id, period, jobs_count, executions_count, storage_bytes)
 SELECT o.id, date_trunc('month', now())::date, (SELECT count(*) FROM jobs j WHERE j.org_id=o.id),
   (SELECT count(*) FROM executions e WHERE e.org_id=o.id AND e.scheduled_ts >= date_trunc('month', now())),
-  (SELECT COALESCE(sum(length(content)),0) FROM execution_logs l WHERE l.org_id=o.id)
+  COALESCE((SELECT bytes FROM org_storage st WHERE st.org_id=o.id), 0)   -- R24: incremental (migration 0013); COALESCE outside: orgs with no logs have no row
 FROM organizations o
 ON CONFLICT (org_id, period) DO UPDATE SET jobs_count=EXCLUDED.jobs_count, executions_count=EXCLUDED.executions_count, storage_bytes=EXCLUDED.storage_bytes
 """
@@ -126,8 +126,20 @@ def score() -> int:
     return done
 
 
+# R24: fold the append-only storage ledger into per-org totals. Ledger rows for organisations that
+# no longer exist (purge_org writes negative deltas just before deleting the org) are consumed and
+# dropped by the join, so they cannot trip org_storage's foreign key.
+COMPACT_STORAGE = text("""
+    WITH d AS (DELETE FROM storage_ledger RETURNING org_id, delta),
+    agg AS (SELECT org_id, sum(delta) AS delta FROM d GROUP BY org_id)
+    INSERT INTO org_storage (org_id, bytes)
+      SELECT a.org_id, a.delta FROM agg a JOIN organizations o ON o.id = a.org_id
+    ON CONFLICT (org_id) DO UPDATE SET bytes = org_storage.bytes + EXCLUDED.bytes, updated_at = now()""")
+
+
 def usage() -> None:
     with system_session() as s:
+        s.execute(COMPACT_STORAGE)
         s.execute(text(USAGE_SQL))
 
 

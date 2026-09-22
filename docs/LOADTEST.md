@@ -174,6 +174,20 @@ Also: retention deletes now take each batch's `execution_logs` with them, replac
 anti-join over the entire logs table; every phase is failure-isolated, so one broken phase logs an
 error and the rest still run.
 
+## R24 — usage metering
+
+Hourly metering ran one `sum(length(content))` subquery per organisation over `execution_logs`,
+which had **no index on `org_id`** — a full table scan per org, so cost = orgs × total log rows.
+6.0 s at 98k rows / 50 orgs. The same missing index made tenant log reads full cross-tenant scans
+(a common search term hid it: `LIMIT 200` stops early; the plan showed the seq scan).
+
+Now an `org_id` index plus an append-only `storage_ledger` fed by statement-level triggers, folded
+into `org_storage` hourly: metering **6.0 s → 0.03 s**. A ledger rather than a per-org counter row,
+so a busy tenant's concurrent log writes don't serialise on one hot row. The meter now counts
+bytes (`octet_length`); the old one counted characters. Tests assert the meter equals a full
+recount after inserts, conflicts, updates, deletes, retention and purged orgs. One real bug caught
+on the way: a log-less org made the metering statement insert NULL and fail for every org.
+
 ## Open findings (not fixed)
 
 - **`/analytics/overview` shows one ~4 s request out of 20** in two separate runs (p95 = max), apparently
@@ -182,7 +196,5 @@ error and the rest still run.
   slots, which the reconciler then marks missed — a missed-alert storm after a long outage, even
   for runs that did happen but were never attached to a slot. R3 behaviour; needs a decision
   (e.g. backfill only as far as the last recorded execution).
-- **Usage metering** still sums `length(content)` over all of a tenant's `execution_logs` every
-  hour — a full scan that grows with log volume. Needs an incremental counter.
 - **Not load-tested:** multi-worker / multi-replica ingest, NATS consumer lag, the notifier
   under an alert storm, and partition growth / retention at months of data.
