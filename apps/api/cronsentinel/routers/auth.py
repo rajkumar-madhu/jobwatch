@@ -1,5 +1,8 @@
 """Keycloak OIDC authorization-code flow → httpOnly session cookie (D1).
-Session = signed JWT {sub, email, name, org_id?} using SECRET_ENCRYPTION_KEY. CSRF: SameSite=Lax + state param."""
+Session = signed JWT {sub, email, name, org_id?} using SECRET_ENCRYPTION_KEY. CSRF: SameSite=Lax + state param.
+PKCE (S256) is required — Keycloak public clients reject authorize requests without code_challenge_method."""
+import base64
+import hashlib
 import json
 import secrets
 import time
@@ -38,6 +41,14 @@ def _discovery():
     return _oidc
 
 
+def _pkce_pair() -> tuple[str, str]:
+    """RFC 7636 S256: verifier is sent on token exchange; challenge goes on the authorize URL."""
+    verifier = secrets.token_urlsafe(64)
+    digest = hashlib.sha256(verifier.encode("ascii")).digest()
+    challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+    return verifier, challenge
+
+
 def sign_session(claims: dict) -> str:
     return jwt.encode({**claims, "iat": int(time.time()), "exp": int(time.time()) + settings.session_ttl_s}, signing_key("session-cookie"), algorithm="HS256")
 
@@ -57,9 +68,9 @@ def _set_cookie(resp: Response, tok: str):
 def login(next: str = "/", login_hint: str | None = None):
     state = secrets.token_urlsafe(24)
     nonce = secrets.token_urlsafe(24)
-    # state and nonce are stored together: state binds the redirect, nonce binds the id_token to
-    # this login attempt so a replayed code cannot mint a session.
-    _r.setex(f"oauth:{state}", 600, json.dumps({"next": next, "nonce": nonce}))
+    verifier, challenge = _pkce_pair()
+    # state binds the redirect; nonce binds the id_token; verifier completes PKCE on token exchange.
+    _r.setex(f"oauth:{state}", 600, json.dumps({"next": next, "nonce": nonce, "code_verifier": verifier}))
     params: dict[str, str] = {
         "client_id": settings.keycloak_client_id,
         "response_type": "code",
@@ -67,6 +78,8 @@ def login(next: str = "/", login_hint: str | None = None):
         "redirect_uri": f"{settings.api_public_url}/auth/callback",
         "state": state,
         "nonce": nonce,
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
     }
     # OIDC login_hint pre-fills the IdP email field when the user typed it on our form.
     if login_hint and "@" in login_hint:
@@ -98,10 +111,13 @@ def callback(code: str | None = None, state: str | None = None, error: str | Non
     try:
         parsed = json.loads(saved)
         nxt, nonce = parsed["next"], parsed["nonce"]
+        code_verifier = parsed.get("code_verifier")
     except (ValueError, KeyError, TypeError):
-        nxt, nonce = saved, None   # tolerate sessions started before the nonce change
+        nxt, nonce, code_verifier = saved, None, None   # tolerate sessions started before the nonce change
     token_data = {"grant_type": "authorization_code", "code": code, "redirect_uri": f"{settings.api_public_url}/auth/callback",
                   "client_id": settings.keycloak_client_id}
+    if code_verifier:
+        token_data["code_verifier"] = code_verifier
     if settings.keycloak_client_secret:
         token_data["client_secret"] = settings.keycloak_client_secret
     tok = httpx.post(_discovery()["token_endpoint"], data=token_data, timeout=10)
