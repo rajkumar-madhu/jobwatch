@@ -52,6 +52,9 @@ COVERED = {
 # the guard only checked the paths already on it — so R4's integrations reads, never listed, were
 # never flagged. Every entry below is a GET whose response shape nothing validates.
 UNMODELLED: set[str] = {
+    # R29: a compliance export, not a dashboard read — its shape is a nested tree of whichever
+    # sections exist for the org, not worth a matching pydantic tree for a one-off admin action.
+    "/api/v1/org/export",
     # Generated from the route table at R16 — detail/drill-down reads off the dashboard's main
     # paths. Each is a known gap: nothing validates its response shape.
     "/api/v1/alerts/ledger",

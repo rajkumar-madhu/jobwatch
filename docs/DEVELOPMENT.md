@@ -726,3 +726,32 @@ role to be able to `SET ROLE X`, and Postgres's role membership graph is acyclic
 also grant `jobwatch_system -> migrator` membership while `migrator -> jobwatch_system` (needed for
 the upgrade) already exists. A fresh deployment only ever upgrades, so this is scoped intentionally,
 not an oversight — see migration 0013's `downgrade()` comment.
+
+## R29 — self-service organization export and deletion
+
+`GET /api/v1/org/export` (any authenticated role) returns a single JSON document: org profile,
+members (email/name/role — the actual personal data GDPR export is about), workspaces, jobs, alert
+channels/rules and integrations (metadata only — `config_enc` is envelope-encrypted and was never
+returned before this either), api keys and agents (metadata only, never a hash), incidents (capped
+at 500), status pages, subscription, and the last 24 usage periods. Raw execution history/logs are
+excluded on purpose: operational telemetry, not org config or personal data, and unboundedly large
+for an old org — already reachable via the existing paginated endpoints if genuinely needed.
+
+`DELETE /api/v1/org/` (owner role) requires the caller to send the org's own slug back
+(`confirm_slug`, checked server-side) and is refused with 409 while a paid subscription is active —
+cancel billing first via the existing `/billing` flow. Runs `purge_org()` for the handful of
+org-scoped tables with no FK to `organizations` (partitioned execution/log tables, R24's storage
+ledger), then deletes the org row itself; every other org-scoped table cascades (verified: every FK
+to `organizations` is `ON DELETE CASCADE`). No `audit_logs` row for the deletion — `purge_org()`
+empties that table, so a row describing the action would not survive the action; the durable record
+is a structured `log.warning` line instead. Mutation-checked: removing either guard fails exactly
+the two tests that assert it.
+
+Added to the router-smoke test's `SKIP_AUTHED_CALL`: unlike other destructive endpoints (`DELETE
+/jobs/{id}` etc.), this one has no ghost-id escape hatch — a generic authenticated call with a valid
+body would delete the org every other test in that sweep depends on. Exercised for real instead in
+`tests/integration/test_org_gdpr.py`.
+
+Also cleared a genuinely stale `monitoring_gaps` row left in the dev DB from earlier R25/26 manual
+verification — it was silently reclassifying unrelated tests' overdue slots as `unobserved`. Test
+hygiene, not a product bug; same class as the previously-noted orphaned `execution_logs` rows.
