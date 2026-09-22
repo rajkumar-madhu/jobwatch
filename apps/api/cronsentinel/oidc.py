@@ -47,9 +47,10 @@ def _key_for(jwks: dict, kid: str | None) -> dict:
 
 
 def verify_id_token(token: str, *, jwks: dict, issuer: str, audience: str, nonce: str | None = None,
-                    now: float | None = None) -> dict:
+                    access_token: str | None = None, now: float | None = None) -> dict:
     """Return the verified claims, or raise IdTokenError. Checks, in order:
-    alg allow-list, signature, iss, aud (incl. azp for multi-audience tokens), exp/iat, nonce."""
+    alg allow-list, signature, iss, aud (incl. azp for multi-audience tokens), exp/iat, nonce.
+    When the id_token carries at_hash (Keycloak does), pass access_token so jose can verify it."""
     try:
         header = jwt.get_unverified_header(token)
     except JWTError as e:
@@ -59,9 +60,12 @@ def verify_id_token(token: str, *, jwks: dict, issuer: str, audience: str, nonce
         raise IdTokenError(f"disallowed alg {alg!r}")
     key = _key_for(jwks, header.get("kid"))
     try:
-        claims = jwt.decode(token, key, algorithms=list(ALLOWED_ALGS), issuer=issuer, audience=audience,
-                            options={"verify_aud": True, "verify_iss": True, "verify_exp": True,
-                                     "verify_signature": True, "leeway": LEEWAY_S})
+        claims = jwt.decode(
+            token, key, algorithms=list(ALLOWED_ALGS), issuer=issuer, audience=audience,
+            access_token=access_token,
+            options={"verify_aud": True, "verify_iss": True, "verify_exp": True,
+                     "verify_signature": True, "leeway": LEEWAY_S},
+        )
     except JWTError as e:
         raise IdTokenError(f"id_token rejected: {e}") from e
 

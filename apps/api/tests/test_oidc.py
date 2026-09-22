@@ -108,3 +108,18 @@ def test_token_without_sub_is_rejected():
     pem, jwks = _keypair()
     with pytest.raises(IdTokenError, match="sub"):
         verify_id_token(_token(pem, sub=""), jwks=jwks, issuer=ISS, audience=AUD, nonce="n1")
+
+
+def test_at_hash_requires_matching_access_token():
+    """Keycloak id_tokens include at_hash; jose rejects them unless access_token is supplied."""
+    import base64
+    import hashlib
+
+    pem, jwks = _keypair()
+    access = "opaque-access-token-value"
+    digest = hashlib.sha256(access.encode("utf-8")).digest()
+    at_hash = base64.urlsafe_b64encode(digest[: len(digest) // 2]).rstrip(b"=").decode("ascii")
+    tok = _token(pem, **{"at_hash": at_hash})
+    with pytest.raises(IdTokenError, match="access_token|at_hash"):
+        verify_id_token(tok, jwks=jwks, issuer=ISS, audience=AUD, nonce="n1")
+    assert verify_id_token(tok, jwks=jwks, issuer=ISS, audience=AUD, nonce="n1", access_token=access)["sub"] == "user-1"

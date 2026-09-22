@@ -122,15 +122,22 @@ def callback(code: str | None = None, state: str | None = None, error: str | Non
         token_data["client_secret"] = settings.keycloak_client_secret
     tok = httpx.post(_discovery()["token_endpoint"], data=token_data, timeout=10)
     if tok.status_code != 200: raise HTTPException(401, "token exchange failed")
+    payload = tok.json()
+    id_token = payload.get("id_token")
+    access_token = payload.get("access_token")
+    if not id_token:
+        raise HTTPException(401, "token response missing id_token")
     disc = _discovery()
     try:
-        claims = verify_id_token(tok.json()["id_token"], jwks=fetch_jwks(disc["jwks_uri"]),
-                                 issuer=disc["issuer"], audience=settings.keycloak_client_id, nonce=nonce)
+        claims = verify_id_token(id_token, jwks=fetch_jwks(disc["jwks_uri"]),
+                                 issuer=disc["issuer"], audience=settings.keycloak_client_id,
+                                 nonce=nonce, access_token=access_token)
     except IdTokenError:
         # a rotated signing key looks exactly like a bad signature: refetch once before rejecting
         try:
-            claims = verify_id_token(tok.json()["id_token"], jwks=fetch_jwks(disc["jwks_uri"], force=True),
-                                     issuer=disc["issuer"], audience=settings.keycloak_client_id, nonce=nonce)
+            claims = verify_id_token(id_token, jwks=fetch_jwks(disc["jwks_uri"], force=True),
+                                     issuer=disc["issuer"], audience=settings.keycloak_client_id,
+                                     nonce=nonce, access_token=access_token)
         except IdTokenError as e:
             raise HTTPException(401, f"invalid id_token: {e}") from e
     email = claims.get("email")
