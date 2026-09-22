@@ -122,20 +122,26 @@ function OnboardingInner() {
       const ws = await api<{ id: string }[]>("/api/v1/workspaces");
       if (!ws?.[0]?.id) throw new Error("No workspace yet. Go back and create one first.");
       const name = "my-first-job";
+      const pickExisting = async (preferName?: string) => {
+        const page = await api<{ items: { heartbeat_token?: string; name?: string }[] }>("/api/v1/jobs?limit=50");
+        const byName = preferName ? page.items.find((j) => j.name === preferName) : undefined;
+        const any = byName ?? page.items.find((j) => j.heartbeat_token);
+        if (!any?.heartbeat_token) return null;
+        return any;
+      };
       try {
         return await api<{ heartbeat_token?: string; name?: string }>("/api/v1/jobs", {
           method: "POST",
           body: JSON.stringify({ workspace_id: ws[0].id, name, grace_s: 300 }),
         });
       } catch (e) {
-        // 409 = name already taken from a prior onboarding attempt — reuse that job
-        if (!(e instanceof Error) || !("status" in e) || (e as { status?: number }).status !== 409) throw e;
-        const page = await api<{ items: { heartbeat_token?: string; name?: string }[] }>("/api/v1/jobs?limit=50");
-        const existing = page.items.find((j) => j.name === name);
-        if (!existing?.heartbeat_token) {
-          throw new Error("Job “my-first-job” already exists but its token could not be loaded. Open Jobs and use that job, or rename/delete it.");
+        const status = e instanceof Error && "status" in e ? (e as { status?: number }).status : undefined;
+        // 409 = name taken; 402 = plan job limit — reuse an existing job’s heartbeat token
+        if (status === 409 || status === 402) {
+          const existing = await pickExisting(status === 409 ? name : undefined);
+          if (existing) return existing;
         }
-        return existing;
+        throw e;
       }
     },
     onSuccess: (j) => { setJob(j); setStep(4); },
