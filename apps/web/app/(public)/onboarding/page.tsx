@@ -120,10 +120,23 @@ function OnboardingInner() {
   const mkJob = useMutation({
     mutationFn: async () => {
       const ws = await api<{ id: string }[]>("/api/v1/workspaces");
-      return api<{ heartbeat_token?: string; name?: string }>("/api/v1/jobs", {
-        method: "POST",
-        body: JSON.stringify({ workspace_id: ws[0].id, name: "my-first-job", grace_s: 300 }),
-      });
+      if (!ws?.[0]?.id) throw new Error("No workspace yet. Go back and create one first.");
+      const name = "my-first-job";
+      try {
+        return await api<{ heartbeat_token?: string; name?: string }>("/api/v1/jobs", {
+          method: "POST",
+          body: JSON.stringify({ workspace_id: ws[0].id, name, grace_s: 300 }),
+        });
+      } catch (e) {
+        // 409 = name already taken from a prior onboarding attempt — reuse that job
+        if (!(e instanceof Error) || !("status" in e) || (e as { status?: number }).status !== 409) throw e;
+        const page = await api<{ items: { heartbeat_token?: string; name?: string }[] }>("/api/v1/jobs?limit=50");
+        const existing = page.items.find((j) => j.name === name);
+        if (!existing?.heartbeat_token) {
+          throw new Error("Job “my-first-job” already exists but its token could not be loaded. Open Jobs and use that job, or rename/delete it.");
+        }
+        return existing;
+      }
     },
     onSuccess: (j) => { setJob(j); setStep(4); },
   });
@@ -243,6 +256,9 @@ function OnboardingInner() {
                 {mkJob.isPending ? "Creating…" : "Create my first job"}
               </button>
             </>
+          )}
+          {(mkJob.error || mkTok.error) && (
+            <p className="mt-3 text-sm text-bad" role="alert">{((mkJob.error || mkTok.error) as Error).message}</p>
           )}
         </>
       )}
