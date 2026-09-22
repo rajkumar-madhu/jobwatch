@@ -28,3 +28,8 @@ app.include_router(k8s.agent)
 @app.get("/healthz")
 def healthz():
     return {"status": "ok", "nats": getattr(app.state, "js", None) is not None and events.is_connected()}
+
+
+@app.get("/readyz")
+def readyz():
+    return healthz()

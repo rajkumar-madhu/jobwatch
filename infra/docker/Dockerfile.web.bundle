@@ -1,0 +1,12 @@
+# Runtime image for an already-built Next.js app.
+# Used when the build host cannot run npm inside an emulated amd64 container.
+FROM node:22-alpine
+WORKDIR /app
+COPY infra/docker/web-linux-modules/modules ./node_modules
+COPY apps/web/package.json apps/web/package-lock.json apps/web/next.config.mjs ./
+COPY apps/web/.next ./.next
+RUN chown -R 1000:1000 /app
+USER 1000
+EXPOSE 3000
+ENV PORT=3000
+CMD ["npm", "start"]

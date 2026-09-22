@@ -11,7 +11,11 @@ spec:
       containers:
         - name: nats
           image: nats:2.10-alpine
+          {{- if eq (int .Values.nats.replicas) 1 }}
+          args: ["-js", "-sd", "/data"]
+          {{- else }}
           args: ["-js", "-sd", "/data", "--cluster_name", "cs", "--cluster", "nats://0.0.0.0:6222", "--routes", "nats://{{ .Release.Name }}-nats-0.{{ .Release.Name }}-nats:6222,nats://{{ .Release.Name }}-nats-1.{{ .Release.Name }}-nats:6222,nats://{{ .Release.Name }}-nats-2.{{ .Release.Name }}-nats:6222"]
+          {{- end }}
           ports: [{containerPort: 4222}, {containerPort: 6222}]
           volumeMounts: [{name: data, mountPath: /data}]
   volumeClaimTemplates: [{metadata: {name: data}, spec: {accessModes: [ReadWriteOnce], resources: {requests: {storage: {{ .Values.nats.storage }}}}}}]

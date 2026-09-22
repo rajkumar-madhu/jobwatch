@@ -31,11 +31,9 @@ export default function OverviewPage() {
           : <><b className="text-bad">{bad} job{bad === 1 ? "" : "s"} need attention</b>{late > 0 && <>, {late} running late</>}. {d.executions_today} runs today, {d.success_rate_today}% succeeded.</>}
       </p>
 
-      {d && <div className="mb-6 grid grid-cols-3 gap-x-6 gap-y-3 text-sm sm:grid-cols-5 lg:grid-cols-9">
-        {([["healthy", "Healthy"], ["running", "Running"], ["late", "Late"], ["missed", "Missed"], ["failed", "Failed"], ["timeout", "Timed out"], ["paused", "Paused"]] as [string, string][]).map(([k, l]) => (
-          <div key={k}><div className="text-xl font-semibold tabular-nums">{d.by_status[k] ?? 0}</div><div className="flex items-center gap-1 text-xs text-mute"><span className={`dot dot-${k}`} />{l}</div></div>))}
-        <div><div className="text-xl font-semibold tabular-nums">{(d as any).mttd_min != null ? `${(d as any).mttd_min}m` : "—"}</div><div className="text-xs text-mute">MTTD, 30d</div></div>
-        <div><div className="text-xl font-semibold tabular-nums">{(d as any).mttr_min != null ? `${(d as any).mttr_min}m` : "—"}</div><div className="text-xs text-mute">MTTR, 30d</div></div>
+      {d && <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        {([["healthy", "Healthy"], ["running", "Running"], ["late", "Late"], ["missed", "Missed"], ["failed", "Failed"]] as [string, string][]).map(([k, l]) => (
+          <div key={k} className="card px-4 py-3"><div className="text-2xl font-semibold tabular-nums text-accent">{d.by_status[k] ?? 0}</div><div className="mt-1 flex items-center gap-1 text-xs text-mute"><span className={`dot dot-${k}`} />{l}</div></div>))}
       </div>}
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-[3fr_2fr]">
         <section>
@@ -53,7 +51,7 @@ export default function OverviewPage() {
               </div>}
 
           <h2 className="mb-2 mt-8 text-sm font-medium">Last 7 days</h2>
-          <div className="h-36 rounded-lg border border-line p-2">{pts.length > 0 ? <ResponsiveContainer><BarChart data={pts}><XAxis dataKey="t" tick={{ fontSize: 11 }} /><Tooltip /><Bar dataKey="ok" stackId="a" fill="rgb(var(--ok))" name="succeeded" /><Bar dataKey="failed" stackId="a" fill="rgb(var(--bad))" name="failed" /><Bar dataKey="missed" stackId="a" fill="rgb(var(--warn))" name="missed" /></BarChart></ResponsiveContainer> : <div className="skeleton h-full" />}</div>
+          <div className="card h-44 p-3">{pts.length > 0 ? <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}><BarChart data={pts}><XAxis dataKey="t" tick={{ fontSize: 11 }} /><Tooltip /><Bar dataKey="ok" stackId="a" fill="rgb(var(--ok))" name="succeeded" /><Bar dataKey="failed" stackId="a" fill="rgb(var(--bad))" name="failed" /><Bar dataKey="missed" stackId="a" fill="rgb(var(--warn))" name="missed" /></BarChart></ResponsiveContainer> : <div className="skeleton h-full" />}</div>
           <h2 className="mb-2 mt-8 text-sm font-medium">Running now</h2>
           {running.data?.items.length === 0 ? <p className="text-sm text-mute">Nothing is executing at the moment.</p>
             : <div className="tbl rounded-lg border border-line">{running.data?.items.map((j) => (
@@ -69,15 +67,15 @@ export default function OverviewPage() {
           </div>
           <div>
             <h2 className="mb-2 text-sm font-medium">Slowest jobs, 7 days (p95)</h2>
-            <ul className="tbl rounded-lg border border-line">{d?.top_slowest_7d.map((r) => (
+            <ul className="tbl rounded-lg border border-line">{(d?.top_slowest_7d ?? []).map((r) => (
               <li key={r.name} className="row grid-cols-[1fr_auto]"><span className="truncate">{r.name}</span><span className="font-mono text-xs">{dur(r.p95_ms ?? null)}</span></li>))}
-              {d?.top_slowest_7d.length === 0 && <li className="px-4 py-3 text-sm text-mute">No completed runs yet.</li>}</ul>
+              {(d?.top_slowest_7d?.length ?? 0) === 0 && <li className="px-4 py-3 text-sm text-mute">No completed runs yet.</li>}</ul>
           </div>
           <div>
             <h2 className="mb-2 text-sm font-medium">Most failures, 7 days</h2>
-            <ul className="tbl rounded-lg border border-line">{d?.top_failing_7d.map((r) => (
+            <ul className="tbl rounded-lg border border-line">{(d?.top_failing_7d ?? []).map((r) => (
               <li key={r.name} className="row grid-cols-[1fr_auto]"><span className="truncate">{r.name}</span><span className="text-bad">{r.failures}</span></li>))}
-              {d?.top_failing_7d.length === 0 && <li className="px-4 py-3 text-sm text-mute">No failures this week.</li>}</ul>
+              {(d?.top_failing_7d?.length ?? 0) === 0 && <li className="px-4 py-3 text-sm text-mute">No failures this week.</li>}</ul>
           </div>
         </section>
       </div>
