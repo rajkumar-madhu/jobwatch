@@ -12,8 +12,11 @@ export default function IncidentsPage() {
   const q = useQuery({ queryKey: ["incidents", tab], queryFn: () => api<Incident[]>(`/api/v1/incidents?status=${tab}&limit=100`) });
   return (
     <Page title="Incidents">
-      <div className="mb-3 flex gap-1">{(["open", "acknowledged", "resolved"] as const).map((t) => (
-        <button key={t} onClick={() => setTab(t)} className={`rounded-md px-2.5 py-1 text-sm capitalize ${tab === t ? "bg-ink/10 font-medium" : "text-mute hover:text-ink"}`}>{t}</button>))}</div>
+      <div className="mb-3 flex gap-1" role="tablist" aria-label="Incident status">
+        {(["open", "acknowledged", "resolved"] as const).map((t) => (
+          <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={`rounded-md px-2.5 py-1 text-sm capitalize ${tab === t ? "bg-ink/10 font-medium" : "text-mute hover:text-ink"}`}>{t}</button>
+        ))}
+      </div>
       {q.error ? <ErrorBox error={q.error} /> : q.isLoading ? <Skeleton /> : q.data!.length === 0
         ? <Empty title={`No ${tab} incidents`} hint="Incidents open automatically when an alert rule fires and close when the job recovers." />
         : <div className="tbl rounded-lg border border-line">
