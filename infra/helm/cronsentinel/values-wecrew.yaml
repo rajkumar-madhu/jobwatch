@@ -1,0 +1,51 @@
+# Live WeCrew k3s (context `wecrew`, host 187.127.118.240).
+# Images are imported into the node containerd runtime; they are not pulled from a registry.
+# Database passwords are supplied at install time and are not stored in this file.
+image:
+  api: docker.io/library/jobwatch-api:wecrew
+  web: docker.io/library/jobwatch-web:wecrew
+imagePullPolicy: Never
+domain: jobwatch.wecrew.in
+ingestDomain: jobwatch.wecrew.in
+ingress:
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod-dns01
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: 16m
+replicas:
+  api: 1
+  ingest: 1
+  web: 1
+  execProcessor: 1
+  reconciler: 1
+  scheduleGenerator: 1
+  outboundExporter: 1
+  ruleEngine: 1
+  notifier: 1
+  scorer: 1
+nats:
+  replicas: 1
+  storage: 1Gi
+resources:
+  api:
+    requests: {cpu: 50m, memory: 192Mi}
+    limits: {cpu: "1", memory: 512Mi}
+  worker:
+    requests: {cpu: 20m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 384Mi}
+env:
+  REDIS_URL: redis://jobwatch-redis:6379/0
+  NATS_URL: nats://jobwatch-nats:4222
+  KEYCLOAK_ISSUER: https://keycloak.wecrew.in/auth/realms/cronsentinel
+  KEYCLOAK_CLIENT_ID: cronsentinel-web
+  KEYCLOAK_CLIENT_SECRET: ""
+  API_PUBLIC_URL: https://jobwatch.wecrew.in
+  WEB_PUBLIC_URL: https://jobwatch.wecrew.in
+  COOKIE_SECURE: "true"
+  COPILOT_BASE_URL: ""
+  COPILOT_MODEL: qwen2.5:14b
+  COPILOT_ALLOW_EXTERNAL: "false"
+  OUTBOUND_ALLOW_PRIVATE: "true"
+  STRIPE_SECRET_KEY: ""
+  STRIPE_WEBHOOK_SECRET: ""

@@ -8,7 +8,7 @@ import "@fontsource/ibm-plex-mono/500.css";
 import "./globals.css";
 import type { Metadata } from "next";
 import { Providers } from "@/components/providers";
-export const metadata: Metadata = { title: "WeCrew JobWatch — never miss a scheduled job", description: "Monitor cron jobs, Kubernetes CronJobs, backups, pipelines and scripts from one platform." };
+export const metadata: Metadata = { title: "JobWatch — scheduled job monitoring", description: "Monitor cron jobs, Kubernetes CronJobs, backups, pipelines and scripts from one operations desk." };
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (<html lang="en" suppressHydrationWarning><body><Providers>{children}</Providers></body></html>);
 }
