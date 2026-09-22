@@ -37,7 +37,7 @@ def _healthy_platform():
     from cronsentinel.db import system_session
     with system_session() as s:
         s.execute(text("DELETE FROM monitoring_gaps"))
-        s.execute(text("""INSERT INTO platform_heartbeats (service, last_seen) VALUES ('schedule-generator', now()), ('reconciler', now())
+        s.execute(text("""INSERT INTO platform_heartbeats (service, last_seen) VALUES ('schedule-generator', now()), ('reconciler', now()), ('ingest', now())
             ON CONFLICT (service) DO UPDATE SET last_seen = now()"""))
     yield
 
@@ -78,15 +78,15 @@ def test_retro_match_uses_one_execution_per_slot_and_keeps_the_nearest(make_job,
 
 
 def test_slot_inside_a_recorded_gap_is_unobserved_not_missed(make_job, org):
-    """Mechanism 2: the generator was down for 40 minutes; a slot whose deadline fell in that window
-    and that nobody reported is unobserved. No synthetic execution, no failure, no alert."""
+    """Mechanism 2: ingest was down for 40 minutes; a slot whose deadline fell in that window and
+    that nobody reported is unobserved. No synthetic execution, no failure, no alert."""
     from cronsentinel.db import system_session
     from cronsentinel.workers import reconciler
     from cronsentinel.workers.platform_health import heartbeat
     j = make_job()
     with system_session() as s:
-        s.execute(text("UPDATE platform_heartbeats SET last_seen = now() - interval '40 minutes' WHERE service='schedule-generator'"))
-        assert heartbeat(s, "schedule-generator", 60) is True            # closes the gap on first pass back
+        s.execute(text("UPDATE platform_heartbeats SET last_seen = now() - interval '40 minutes' WHERE service='ingest'"))
+        assert heartbeat(s, "ingest", 20) is True                        # closes the gap on first beat back
         gap = s.execute(text("SELECT started_at, ended_at FROM monitoring_gaps")).first()
         assert gap and (gap.ended_at - gap.started_at) > timedelta(minutes=39)
         inside = _slot(s, org["id"], j, datetime.now(UTC) - timedelta(minutes=30))    # deadline 20 min ago, in the gap
@@ -97,17 +97,38 @@ def test_slot_inside_a_recorded_gap_is_unobserved_not_missed(make_job, org):
         assert s.execute(text("SELECT slots_unobserved FROM monitoring_gaps")).scalar() == 1
 
 
-def test_silent_generator_is_an_open_gap_for_the_reconciler(make_job, org):
-    """Order of recovery must not matter: the reconciler back first, generator still silent."""
+def test_silent_ingest_is_an_open_gap_for_the_reconciler(make_job, org):
+    """Order of recovery must not matter: the reconciler back first, ingest still silent."""
     from cronsentinel.db import system_session
     from cronsentinel.workers import reconciler
     j = make_job()
     with system_session() as s:
-        s.execute(text("UPDATE platform_heartbeats SET last_seen = now() - interval '20 minutes' WHERE service='schedule-generator'"))
+        s.execute(text("UPDATE platform_heartbeats SET last_seen = now() - interval '20 minutes' WHERE service='ingest'"))
         slot = _slot(s, org["id"], j, datetime.now(UTC) - timedelta(minutes=15))
         reconciler.tick(s)
         assert _state(s, slot) == ("unobserved", None)
-        assert s.execute(text("SELECT count(*) FROM monitoring_gaps")).scalar() == 0   # generator records it when it returns
+        assert s.execute(text("SELECT count(*) FROM monitoring_gaps")).scalar() == 0   # ingest records it when it returns
+
+
+def test_generator_only_outage_is_not_a_gap_but_its_runs_are_recovered(make_job, org):
+    """R26: the generator being down means slots did not exist, not that we were blind. Ingest and
+    the reconciler were watching: a run that happened is retro-matched, an empty slot is a real
+    miss. This is the trade-off R25 left open."""
+    from cronsentinel.db import system_session
+    from cronsentinel.workers import reconciler
+    from cronsentinel.workers.platform_health import heartbeat
+    j = make_job()
+    t = datetime.now(UTC)
+    with system_session() as s:
+        s.execute(text("UPDATE platform_heartbeats SET last_seen = now() - interval '40 minutes' WHERE service='schedule-generator'"))
+        heartbeat(s, "schedule-generator", 60)                           # a gap row exists, but a generator one
+        e = _exec(s, org["id"], j, t - timedelta(minutes=30, seconds=-10))
+        ran = _slot(s, org["id"], j, t - timedelta(minutes=30))
+        empty = _slot(s, org["id"], j, t - timedelta(minutes=20))
+        reconciler.tick(s)
+        assert _state(s, ran) == ("succeeded", e)
+        assert _state(s, empty) == ("missed", None)
+        assert s.execute(text("SELECT slots_unobserved FROM monitoring_gaps")).scalar() == 0
 
 
 def test_healthy_platform_still_marks_a_real_miss(make_job, org):
@@ -141,8 +162,8 @@ def test_slot_before_the_gap_is_still_missed(make_job, org):
     from cronsentinel.workers.platform_health import heartbeat
     j = make_job()
     with system_session() as s:
-        s.execute(text("UPDATE platform_heartbeats SET last_seen = now() - interval '10 minutes' WHERE service='schedule-generator'"))
-        heartbeat(s, "schedule-generator", 60)
+        s.execute(text("UPDATE platform_heartbeats SET last_seen = now() - interval '10 minutes' WHERE service='ingest'"))
+        heartbeat(s, "ingest", 20)
         before = _slot(s, org["id"], j, datetime.now(UTC) - timedelta(minutes=40))   # deadline 30 min ago: watched
         reconciler.tick(s)
         assert _state(s, before) == ("missed", None)

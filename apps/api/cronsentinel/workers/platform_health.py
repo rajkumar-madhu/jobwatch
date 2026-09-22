@@ -15,6 +15,13 @@ log = structlog.get_logger()
 
 # A pass can legitimately overrun one interval; three is a break, not a slow tick.
 GAP_MULTIPLIER = 3
+INGEST_HEARTBEAT_S = 20
+
+# R26: which services' silence makes a slot unobservable. Ingest receives the agent's reports and
+# the reconciler judges them; if either was down, an empty slot is *unseen*, not missed. The
+# generator is deliberately absent: its outage only means slots did not exist yet — retro_match
+# recovers the runs that did happen, and a slot that is still empty after that is an honest miss.
+OBSERVING_SERVICES = ("ingest", "reconciler")
 
 
 def heartbeat(s, service: str, interval_s: int) -> bool:
@@ -36,12 +43,14 @@ def heartbeat(s, service: str, interval_s: int) -> bool:
     return True
 
 
-# Slots whose deadline fell inside a recorded gap, or inside the still-open silence of a service
-# that has not reported for longer than its threshold. Used as a predicate on expected_runs `er`.
+# Slots whose deadline fell inside a recorded gap of an observing service, or inside the still-open
+# silence of one that has not reported for longer than its threshold. Predicate on expected_runs
+# `er`; bind :observing (list), :self_service and :thr_s.
 IN_GAP_SQL = """
-    EXISTS (SELECT 1 FROM monitoring_gaps g WHERE er.deadline >= g.started_at AND er.deadline < g.ended_at)
+    EXISTS (SELECT 1 FROM monitoring_gaps g WHERE g.service = ANY(:observing)
+            AND er.deadline >= g.started_at AND er.deadline < g.ended_at)
     OR EXISTS (SELECT 1 FROM platform_heartbeats h
-               WHERE h.service <> :self_service
+               WHERE h.service = ANY(:observing) AND h.service <> :self_service
                  AND h.last_seen < now() - make_interval(secs => :thr_s)
                  AND er.deadline >= h.last_seen)
 """

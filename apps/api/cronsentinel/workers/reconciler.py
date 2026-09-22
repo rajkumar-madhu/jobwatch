@@ -21,7 +21,7 @@ from .. import events
 from ..config import settings
 from ..db import system_session
 from ..job_state import recompute_state  # single source of truth for the four-state
-from .platform_health import GAP_MULTIPLIER, IN_GAP_SQL, heartbeat
+from .platform_health import GAP_MULTIPLIER, IN_GAP_SQL, INGEST_HEARTBEAT_S, OBSERVING_SERVICES, heartbeat
 
 log = structlog.get_logger()
 
@@ -87,10 +87,10 @@ def _mark_unobserved(s) -> list[tuple]:
         cnt AS (
             UPDATE monitoring_gaps g SET slots_unobserved = g.slots_unobserved + c.n
             FROM (SELECT g2.id, count(*) AS n FROM u JOIN monitoring_gaps g2
-                    ON u.deadline >= g2.started_at AND u.deadline < g2.ended_at GROUP BY g2.id) c
+                    ON g2.service = ANY(:observing) AND u.deadline >= g2.started_at AND u.deadline < g2.ended_at GROUP BY g2.id) c
             WHERE g.id = c.id)
         SELECT job_id, org_id FROM u"""),
-        {"self_service": "reconciler", "thr_s": settings.reconciler_interval_s * GAP_MULTIPLIER}).all()
+        {"self_service": "reconciler", "thr_s": INGEST_HEARTBEAT_S * GAP_MULTIPLIER, "observing": list(OBSERVING_SERVICES)}).all()
     if rows:
         log.warning("slots marked unobserved (monitoring gap)", slots=len(rows))
     return rows

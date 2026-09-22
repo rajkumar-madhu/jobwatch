@@ -690,10 +690,17 @@ Measured on the full stack — 45-minute generator outage, every-minute job, 3 r
 during the outage: before, 46 missed alerts; after, 3 runs recognised, 41 unobserved, 2 genuine
 misses (slots that came due after recovery with no run).
 
-**Trade-off, chosen deliberately:** while the generator is silent, the reconciler will not call any
-overdue slot missed even if ingest was healthy and the job truly did not run. A real miss during
-our outage is deferred to `unobserved` rather than risk a false page. Revisit if ingest gets its own
-heartbeat, which would let the predicate distinguish "we could not see" from "we did not schedule".
+**Trade-off (R25) closed in R26.** Ingest now heartbeats every 20 s from a lifespan task
+(`ingest_main._heartbeat_loop`; any live replica keeps the shared row fresh, which is the right
+semantics — the customer could still be seen). The gap predicate now only counts the *observing*
+services, ingest and the reconciler (`platform_health.OBSERVING_SERVICES`). A generator-only outage
+is no longer a gap: retro-match recovers the runs that happened, and a slot still empty after that
+is an honest miss. Generator gaps are still recorded for the audit trail; they just do not make
+slots unobserved.
+
+Replayed on the full stack (every-minute job, 3 real runs during a 45-minute outage): generator
+down → 3 recovered, 43 honest misses, 0 unobserved; ingest down → 3 recovered, 43 unobserved,
+0 missed alerts.
 
 Also fixed: `test_wrong_agent_key_is_rejected` flipped the key's last hex char to "0"; one run in
 16 it already was "0" and the "wrong" key was the right key — a 200 that read like an auth hole.
