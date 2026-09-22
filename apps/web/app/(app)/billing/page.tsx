@@ -1,13 +1,13 @@
 "use client";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { api } from "@/lib/api";
+import { api, mutate } from "@/lib/api";
 import { ago } from "@/lib/format";
 import { Page, Skeleton, ErrorBox } from "@/components/ui";
 
 export default function BillingPage() {
   const q = useQuery({ queryKey: ["billing"], queryFn: () => api<any>("/api/v1/billing") });
-  const checkout = useMutation({ mutationFn: (plan: string) => api<{ url: string }>(`/api/v1/billing/checkout?plan=${plan}`, { method: "POST" }), onSuccess: (d) => (location.href = d.url) });
-  const portal = useMutation({ mutationFn: () => api<{ url: string }>("/api/v1/billing/portal", { method: "POST" }), onSuccess: (d) => (location.href = d.url) });
+  const checkout = useMutation({ mutationFn: (plan: string) => mutate("/api/v1/billing/checkout", "post", { query: { plan } }) as Promise<{ url: string }>, onSuccess: (d) => (location.href = d.url) });
+  const portal = useMutation({ mutationFn: () => mutate("/api/v1/billing/portal", "post", {}) as Promise<{ url: string }>, onSuccess: (d) => (location.href = d.url) });
   if (q.error) return <Page title="Billing"><ErrorBox error={q.error} /></Page>;
   if (!q.data) return <Page title="Billing"><Skeleton /></Page>;
   const { subscription: s, plans, usage, limits, configured } = q.data;

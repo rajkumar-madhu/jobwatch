@@ -818,3 +818,32 @@ This closes the last item from the earlier open-items list: CI-as-non-superuser 
 org export/deletion (R29), the nats outbound destination (R30), and multi-replica ingest heartbeat
 semantics (R31) are all now implemented, tested, and verified against real infrastructure — not
 just described.
+
+## R32 — typed request bodies on the frontend
+
+Since R15 the generated `lib/api-types.ts` has carried `requestBody` for every POST/PUT/PATCH, but
+nothing consumed it: all 29 mutation call sites were `api(path, { body: JSON.stringify({...}) })`,
+so a misspelled or missing field was a runtime 422 the user saw, never a compile error.
+
+`mutate(path, method, { path, query, body })` in `lib/api.ts` infers the body, path params, query
+params and success response from `paths`. All 29 sites migrated; zero raw mutation calls remain.
+Type-level mutation check: a misspelled body field, a missing required field, a wrong path-param
+name, a wrong query type and a non-mutation method each fail `tsc` with the specific error.
+
+Two things it found on the way:
+
+- **The generator was lying about request bodies.** `openapi-typescript` v7 defaults
+  `--default-non-nullable` to true, which turns "has a default" into "required" — right for a
+  response (the server always fills it), wrong for a request (the client may omit it). The first
+  migrated call site, the create-job form, "failed" typecheck for omitting `kind` and `tags`,
+  both of which the API defaults. Now generated with the flag off.
+- **Which exposed output models that were lying too.** With the flag off, `OverviewOut.by_status`,
+  `top_slowest_7d` and `top_failing_7d` became optional on the read side — because the response
+  model declared `= {}` / `= []` defaults, which in an *output* model claims the field may be
+  absent. The handler always sets all three. Defaults removed; the spec now says required because
+  it is.
+
+Responses with no `response_model` (the R14/R15 `UNMODELLED` list: schedule preview, agent
+bootstrap/rotate, billing checkout/portal, destination test, copilot ask, `/auth/orgs`) come back
+as `unknown` and are cast at the call site, as before — the cast is now the visible marker of an
+unmodelled endpoint rather than an invisible default.

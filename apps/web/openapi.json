@@ -6156,7 +6156,7 @@
           "integrations"
         ],
         "summary": "Test Destination",
-        "description": "Synchronous test: sends a job.state_changed sample and reports the response code.",
+        "description": "Synchronous test: sends a job.state_changed sample and reports the outcome.",
         "operationId": "test_destination_api_v1_integrations_destinations__dest_id__test_post",
         "parameters": [
           {
@@ -6402,6 +6402,169 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/org/export": {
+      "get": {
+        "tags": [
+          "org"
+        ],
+        "summary": "Export Org",
+        "operationId": "export_org_api_v1_org_export_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "x-org-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Org-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/org/": {
+      "delete": {
+        "tags": [
+          "org"
+        ],
+        "summary": "Delete Org",
+        "operationId": "delete_org_api_v1_org__delete",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
+            "name": "x-org-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Org-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteOrgIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
           },
           "422": {
             "description": "Validation Error",
@@ -6905,6 +7068,19 @@
         ],
         "title": "CreateOrg"
       },
+      "DeleteOrgIn": {
+        "properties": {
+          "confirm_slug": {
+            "type": "string",
+            "title": "Confirm Slug"
+          }
+        },
+        "type": "object",
+        "required": [
+          "confirm_slug"
+        ],
+        "title": "DeleteOrgIn"
+      },
       "DepIn": {
         "properties": {
           "job_id": {
@@ -7016,9 +7192,6 @@
           },
           "url": {
             "type": "string",
-            "maxLength": 2083,
-            "minLength": 1,
-            "format": "uri",
             "title": "Url"
           },
           "secret": {
@@ -7041,6 +7214,30 @@
             "type": "object",
             "title": "Headers",
             "default": {}
+          },
+          "subject_prefix": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject Prefix"
+          },
+          "token": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token"
           },
           "event_types": {
             "items": {
@@ -8106,8 +8303,7 @@
               "type": "integer"
             },
             "type": "object",
-            "title": "By Status",
-            "default": {}
+            "title": "By Status"
           },
           "executions_today": {
             "type": "integer",
@@ -8129,16 +8325,14 @@
               "$ref": "#/components/schemas/NamedMetric"
             },
             "type": "array",
-            "title": "Top Slowest 7D",
-            "default": []
+            "title": "Top Slowest 7D"
           },
           "top_failing_7d": {
             "items": {
               "$ref": "#/components/schemas/NamedMetric"
             },
             "type": "array",
-            "title": "Top Failing 7D",
-            "default": []
+            "title": "Top Failing 7D"
           },
           "mttd_min": {
             "anyOf": [
@@ -8166,7 +8360,10 @@
         "type": "object",
         "required": [
           "total_jobs",
-          "executions_today"
+          "by_status",
+          "executions_today",
+          "top_slowest_7d",
+          "top_failing_7d"
         ],
         "title": "OverviewOut"
       },
@@ -8562,6 +8759,22 @@
           "has_secret": {
             "type": "boolean",
             "title": "Has Secret",
+            "default": false
+          },
+          "subject_prefix": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject Prefix"
+          },
+          "has_token": {
+            "type": "boolean",
+            "title": "Has Token",
             "default": false
           }
         },

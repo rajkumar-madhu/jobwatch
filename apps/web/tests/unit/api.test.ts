@@ -133,3 +133,21 @@ describe("errors", () => {
     expect(JSON.stringify(localStorage)).not.toContain(CSRF);
   });
 });
+
+// R32: mutate() builds the URL from the template + params and sends the body once, JSON-encoded.
+describe("mutate()", () => {
+  it("substitutes path params, encodes them, and appends query", async () => {
+    localStorage.setItem("cs_api_key", "k");
+    const calls: [string, RequestInit][] = [];
+    vi.stubGlobal("fetch", vi.fn(async (u: string, i: RequestInit) => { calls.push([u, i]); return new Response("{}", { status: 200 }); }));
+    const { mutate } = await import("@/lib/api");
+    await mutate("/api/v1/alerts/rules/{rule_id}", "patch", { path: { rule_id: "a/b" }, query: { enabled: true } });
+    await mutate("/api/v1/dependencies", "delete", { query: { job_id: "j", depends_on_job_id: "d" } });
+    await mutate("/api/v1/jobs/{job_id}", "patch", { path: { job_id: "x" }, body: { paused: false } });
+    expect(calls[0][0]).toMatch(/\/api\/v1\/alerts\/rules\/a%2Fb\?enabled=true$/);
+    expect(calls[0][1].method).toBe("PATCH");
+    expect(calls[0][1].body).toBeUndefined();
+    expect(calls[1][0]).toMatch(/\/api\/v1\/dependencies\?job_id=j&depends_on_job_id=d$/);
+    expect(calls[2][1].body).toBe(JSON.stringify({ paused: false }));
+  });
+});

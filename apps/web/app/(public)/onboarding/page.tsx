@@ -2,7 +2,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
-import { api } from "@/lib/api";
+import { api, mutate } from "@/lib/api";
 
 const API = process.env.NEXT_PUBLIC_API_URL; const INGEST = API?.replace("8000", "8010");
 const METHODS = [
@@ -16,9 +16,9 @@ export default function Onboarding() {
   const sess = useQuery({ queryKey: ["session"], queryFn: () => api<{ user: { email: string }; org_id: string | null }>("/auth/session"), retry: false });
   const [step, setStep] = useState(1); const [org, setOrg] = useState(""); const [method, setMethod] = useState<string>("heartbeat");
   const [job, setJob] = useState<any>(null); const [tok, setTok] = useState<any>(null);
-  const createOrg = useMutation({ mutationFn: () => api<{ org_id: string }>("/auth/orgs", { method: "POST", body: JSON.stringify({ name: org }) }), onSuccess: () => { sess.refetch(); setStep(2); } });
-  const mkJob = useMutation({ mutationFn: async () => { const ws = await api<{ id: string }[]>("/api/v1/workspaces"); return api("/api/v1/jobs", { method: "POST", body: JSON.stringify({ workspace_id: ws[0].id, name: "my-first-job", grace_s: 300 }) }); }, onSuccess: (j) => { setJob(j); setStep(4); } });
-  const mkTok = useMutation({ mutationFn: () => api("/api/v1/agents/bootstrap-token", { method: "POST", body: JSON.stringify({}) }), onSuccess: (t) => { setTok(t); setStep(4); } });
+  const createOrg = useMutation({ mutationFn: () => mutate("/auth/orgs", "post", { body: { name: org } }) as Promise<{ org_id: string }>, onSuccess: () => { sess.refetch(); setStep(2); } });
+  const mkJob = useMutation({ mutationFn: async () => { const ws = await api<{ id: string }[]>("/api/v1/workspaces"); return mutate("/api/v1/jobs", "post", { body: { workspace_id: ws[0].id, name: "my-first-job", grace_s: 300 } }); }, onSuccess: (j) => { setJob(j); setStep(4); } });
+  const mkTok = useMutation({ mutationFn: () => mutate("/api/v1/agents/bootstrap-token", "post", { body: {} }), onSuccess: (t) => { setTok(t); setStep(4); } });
   const jobs = useQuery({ queryKey: ["jobs", "onb"], queryFn: () => api<{ items: any[] }>("/api/v1/jobs?limit=5"), enabled: step === 4, refetchInterval: 3000 });
   const detected = (jobs.data?.items ?? []).filter((j) => j.last_run_at || j.source === "agent");
 

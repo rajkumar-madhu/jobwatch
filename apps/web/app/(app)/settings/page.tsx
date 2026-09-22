@@ -1,7 +1,7 @@
 "use client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { api, getKey, setKey, type Job } from "@/lib/api";
+import { api, mutate, getKey, setKey, type Job } from "@/lib/api";
 import { Page, ErrorBox } from "@/components/ui";
 
 export default function SettingsPage() {
@@ -11,8 +11,8 @@ export default function SettingsPage() {
   const pages = useQuery({ queryKey: ["status-pages"], queryFn: () => api<any[]>("/api/v1/status-pages") });
   const jobs = useQuery({ queryKey: ["jobs", "all"], queryFn: () => api<{ items: Job[] }>("/api/v1/jobs?limit=200") });
   const [np, setNp] = useState({ slug: "", title: "", job_ids: [] as string[] });
-  const create = useMutation({ mutationFn: () => api("/api/v1/status-pages", { method: "POST", body: JSON.stringify(np) }), onSuccess: () => { setNp({ slug: "", title: "", job_ids: [] }); qc.invalidateQueries({ queryKey: ["status-pages"] }); } });
-  const del = useMutation({ mutationFn: (id: string) => api(`/api/v1/status-pages/${id}`, { method: "DELETE" }), onSuccess: () => qc.invalidateQueries({ queryKey: ["status-pages"] }) });
+  const create = useMutation({ mutationFn: () => mutate("/api/v1/status-pages", "post", { body: np }), onSuccess: () => { setNp({ slug: "", title: "", job_ids: [] }); qc.invalidateQueries({ queryKey: ["status-pages"] }); } });
+  const del = useMutation({ mutationFn: (id: string) => mutate("/api/v1/status-pages/{page_id}", "delete", { path: { page_id: id } }), onSuccess: () => qc.invalidateQueries({ queryKey: ["status-pages"] }) });
   const inp = "mt-1 w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm";
   return (
     <Page title="Settings">

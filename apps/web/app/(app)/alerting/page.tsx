@@ -1,7 +1,7 @@
 "use client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { api } from "@/lib/api";
+import { api, mutate } from "@/lib/api";
 import { ts } from "@/lib/format";
 import { Page, Skeleton, ErrorBox, Empty } from "@/components/ui";
 
@@ -21,13 +21,13 @@ export default function AlertingPage() {
   const [nc, setNc] = useState<{ kind: string; name: string; config: Record<string, string> } | null>(null);
   const [nr, setNr] = useState<{ name: string; condition: string; tags: string; severity: string; channel_ids: string[]; repeat: string; count: string } | null>(null);
   const inv = (k: string) => () => qc.invalidateQueries({ queryKey: [k] });
-  const addCh = useMutation({ mutationFn: () => api("/api/v1/alerts/channels", { method: "POST", body: JSON.stringify({ ...nc, config: { ...nc!.config, to: nc!.config.to?.split(",").map((s) => s.trim()) } }) }), onSuccess: () => { setNc(null); inv("channels")(); } });
-  const testCh = useMutation({ mutationFn: (id: string) => api(`/api/v1/alerts/channels/${id}/test`, { method: "POST" }), onSuccess: () => setTimeout(inv("ledger"), 2000) });
-  const delCh = useMutation({ mutationFn: (id: string) => api(`/api/v1/alerts/channels/${id}`, { method: "DELETE" }), onSuccess: inv("channels") });
-  const addRule = useMutation({ mutationFn: () => api("/api/v1/alerts/rules", { method: "POST", body: JSON.stringify({ name: nr!.name, condition: nr!.condition, severity: nr!.severity, channel_ids: nr!.channel_ids,
-    scope: nr!.tags ? { tags: nr!.tags.split(",").map((s) => s.trim()) } : {}, params: nr!.condition === "consecutive_failures" ? { count: Number(nr!.count || 3) } : {}, repeat_interval_s: nr!.repeat ? Number(nr!.repeat) * 60 : null }) }), onSuccess: () => { setNr(null); inv("rules")(); } });
-  const toggle = useMutation({ mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) => api(`/api/v1/alerts/rules/${id}?enabled=${enabled}`, { method: "PATCH" }), onSuccess: inv("rules") });
-  const delRule = useMutation({ mutationFn: (id: string) => api(`/api/v1/alerts/rules/${id}`, { method: "DELETE" }), onSuccess: inv("rules") });
+  const addCh = useMutation({ mutationFn: () => mutate("/api/v1/alerts/channels", "post", { body: { ...nc!, config: { ...nc!.config, to: nc!.config.to?.split(",").map((s) => s.trim()) } } }), onSuccess: () => { setNc(null); inv("channels")(); } });
+  const testCh = useMutation({ mutationFn: (id: string) => mutate("/api/v1/alerts/channels/{channel_id}/test", "post", { path: { channel_id: id } }), onSuccess: () => setTimeout(inv("ledger"), 2000) });
+  const delCh = useMutation({ mutationFn: (id: string) => mutate("/api/v1/alerts/channels/{channel_id}", "delete", { path: { channel_id: id } }), onSuccess: inv("channels") });
+  const addRule = useMutation({ mutationFn: () => mutate("/api/v1/alerts/rules", "post", { body: { name: nr!.name, condition: nr!.condition, severity: nr!.severity, channel_ids: nr!.channel_ids,
+    scope: nr!.tags ? { tags: nr!.tags.split(",").map((s) => s.trim()) } : {}, params: nr!.condition === "consecutive_failures" ? { count: Number(nr!.count || 3) } : {}, repeat_interval_s: nr!.repeat ? Number(nr!.repeat) * 60 : null } }), onSuccess: () => { setNr(null); inv("rules")(); } });
+  const toggle = useMutation({ mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) => mutate("/api/v1/alerts/rules/{rule_id}", "patch", { path: { rule_id: id }, query: { enabled } }), onSuccess: inv("rules") });
+  const delRule = useMutation({ mutationFn: (id: string) => mutate("/api/v1/alerts/rules/{rule_id}", "delete", { path: { rule_id: id } }), onSuccess: inv("rules") });
   const inp = "mt-1 w-full rounded-md border border-line bg-bg px-2 py-1.5 text-sm";
   const err = addCh.error || addRule.error;
   return (

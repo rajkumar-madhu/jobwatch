@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
-import { api } from "@/lib/api";
+import { api, mutate } from "@/lib/api";
 import { ago, dur, ts } from "@/lib/format";
 import { Page, Status, Skeleton, ErrorBox, Sev } from "@/components/ui";
 
@@ -15,9 +15,9 @@ export default function IncidentPage() {
   const q = useQuery({ queryKey: ["incident", id], queryFn: () => api<any>(`/api/v1/incidents/${id}`) });
   const [note, setNote] = useState(""); const [res, setRes] = useState({ resolution: "", root_cause: "" });
   const inv = () => qc.invalidateQueries({ queryKey: ["incident", id] });
-  const ack = useMutation({ mutationFn: () => api(`/api/v1/incidents/${id}/ack`, { method: "POST" }), onSuccess: inv });
-  const resolve = useMutation({ mutationFn: () => api(`/api/v1/incidents/${id}/resolve`, { method: "POST", body: JSON.stringify(res) }), onSuccess: inv });
-  const addNote = useMutation({ mutationFn: () => api(`/api/v1/incidents/${id}/notes`, { method: "POST", body: JSON.stringify({ text: note }) }), onSuccess: () => { setNote(""); inv(); } });
+  const ack = useMutation({ mutationFn: () => mutate("/api/v1/incidents/{incident_id}/ack", "post", { path: { incident_id: id } }), onSuccess: inv });
+  const resolve = useMutation({ mutationFn: () => mutate("/api/v1/incidents/{incident_id}/resolve", "post", { path: { incident_id: id }, body: res }), onSuccess: inv });
+  const addNote = useMutation({ mutationFn: () => mutate("/api/v1/incidents/{incident_id}/notes", "post", { path: { incident_id: id }, body: { text: note } }), onSuccess: () => { setNote(""); inv(); } });
   if (q.error) return <Page title="Incident"><ErrorBox error={q.error} /></Page>;
   if (!q.data) return <Page title="Incident"><Skeleton /></Page>;
   const { incident: i, timeline, notifications, affected_jobs, executions, downstream_impact } = q.data;

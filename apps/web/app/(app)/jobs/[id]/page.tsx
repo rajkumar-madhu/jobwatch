@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
-import { api, type Job, type Execution } from "@/lib/api";
+import { api, mutate, type Job, type Execution } from "@/lib/api";
 import { ago, dur, ts, statusLabel } from "@/lib/format";
 import { Page, Status, Strip, Skeleton, ErrorBox, Empty } from "@/components/ui";
 
@@ -72,9 +72,9 @@ export default function JobPage() {
   const impact = useQuery({ queryKey: ["impact", id], queryFn: () => api<{ upstream: any[]; downstream: any[] }>(`/api/v1/jobs/${id}/impact`) });
   const allJobs = useQuery({ queryKey: ["jobs", "all"], queryFn: () => api<{ items: Job[] }>("/api/v1/jobs?limit=200") });
   const [depSel, setDepSel] = useState("");
-  const addDep = useMutation({ mutationFn: () => api("/api/v1/dependencies", { method: "POST", body: JSON.stringify({ job_id: id, depends_on_job_id: depSel }) }), onSuccess: () => { setDepSel(""); qc.invalidateQueries({ queryKey: ["impact", id] }); } });
-  const rmDep = useMutation({ mutationFn: (d: string) => api(`/api/v1/dependencies?job_id=${id}&depends_on_job_id=${d}`, { method: "DELETE" }), onSuccess: () => qc.invalidateQueries({ queryKey: ["impact", id] }) });
-  const pause = useMutation({ mutationFn: (paused: boolean) => api(`/api/v1/jobs/${id}`, { method: "PATCH", body: JSON.stringify({ paused }) }), onSuccess: () => qc.invalidateQueries({ queryKey: ["job", id] }) });
+  const addDep = useMutation({ mutationFn: () => mutate("/api/v1/dependencies", "post", { body: { job_id: id, depends_on_job_id: depSel } }), onSuccess: () => { setDepSel(""); qc.invalidateQueries({ queryKey: ["impact", id] }); } });
+  const rmDep = useMutation({ mutationFn: (d: string) => mutate("/api/v1/dependencies", "delete", { query: { job_id: id, depends_on_job_id: d } }), onSuccess: () => qc.invalidateQueries({ queryKey: ["impact", id] }) });
+  const pause = useMutation({ mutationFn: (paused: boolean) => mutate("/api/v1/jobs/{job_id}", "patch", { path: { job_id: id }, body: { paused } }), onSuccess: () => qc.invalidateQueries({ queryKey: ["job", id] }) });
   if (job.error) return <Page title="Job"><ErrorBox error={job.error} /></Page>;
   if (!job.data) return <Page title="Job"><Skeleton /></Page>;
   const j = job.data; const list = execs.data ?? []; const selected = sel ?? list[0]?.id;

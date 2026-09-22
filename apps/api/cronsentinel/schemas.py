@@ -204,11 +204,12 @@ class NamedMetric(BaseModel):
 class OverviewOut(BaseModel):
     total_jobs: int
     # Keyed by job status value — a data-keyed map, not a fixed set of fields.
-    by_status: dict[str, int] = {}
+    by_status: dict[str, int]          # R32: always set by the handler; a default here told the
+                                        # generated client it could be missing
     executions_today: int
     success_rate_today: float | None = None
-    top_slowest_7d: list[NamedMetric] = []
-    top_failing_7d: list[NamedMetric] = []
+    top_slowest_7d: list[NamedMetric]
+    top_failing_7d: list[NamedMetric]
     mttd_min: float | None = None
     mttr_min: float | None = None
 

@@ -2,13 +2,13 @@
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
-import { api } from "@/lib/api";
+import { mutate } from "@/lib/api";
 import { ts } from "@/lib/format";
 
 const EXAMPLES: [string, string][] = [["0 2 * * *", "Nightly at 2 AM"], ["*/15 * * * *", "Every 15 minutes"], ["0 9 * * 1-5", "Weekdays at 9 AM"], ["0 0 1 * *", "First of the month"], ["30 4 * * 0", "Sundays 4:30 AM"]];
 export default function CronTool() {
   const [expr, setExpr] = useState("0 2 * * *"); const [tz, setTz] = useState("UTC");
-  const q = useQuery({ queryKey: ["cron", expr, tz], queryFn: () => api<{ human: string; next: string[] }>(`/api/v1/jobs/schedule/preview?expr=${encodeURIComponent(expr)}&tz=${tz}`, { method: "POST" }), retry: false });
+  const q = useQuery({ queryKey: ["cron", expr, tz], queryFn: () => mutate("/api/v1/jobs/schedule/preview", "post", { query: { expr, tz } }) as Promise<{ human: string; next: string[] }>, retry: false });
   const fields = expr.trim().split(/\s+/);
   return (
     <main className="mx-auto max-w-2xl px-6 py-14">

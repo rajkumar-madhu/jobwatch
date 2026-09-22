@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
-import { api, type Job, type Execution } from "@/lib/api";
+import { api, mutate, type Job, type Execution } from "@/lib/api";
 import { ago } from "@/lib/format";
 import { Page, Status, Strip, Skeleton, ErrorBox, Empty } from "@/components/ui";
 
@@ -31,10 +31,10 @@ function NewJob({ onDone }: { onDone: () => void }) {
   const [f, setF] = useState({ name: "", schedule_expr: "", tz: "UTC", grace_s: 300, expected_runtime_s: "" });
   const [preview, setPreview] = useState<{ human: string } | null>(null);
   const m = useMutation({
-    mutationFn: () => api<Job>("/api/v1/jobs", { method: "POST", body: JSON.stringify({ ...f, workspace_id: ws.data?.[0].id, schedule_expr: f.schedule_expr || null, expected_runtime_s: f.expected_runtime_s ? Number(f.expected_runtime_s) : null }) }),
+    mutationFn: () => mutate("/api/v1/jobs", "post", { body: { ...f, workspace_id: ws.data?.[0].id!, schedule_expr: f.schedule_expr || null, expected_runtime_s: f.expected_runtime_s ? Number(f.expected_runtime_s) : null } }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["jobs"] }); onDone(); },
   });
-  const check = async () => { if (!f.schedule_expr) return setPreview(null); try { setPreview(await api(`/api/v1/jobs/schedule/preview?expr=${encodeURIComponent(f.schedule_expr)}&tz=${f.tz}`, { method: "POST" })); } catch { setPreview({ human: "Invalid expression" }); } };
+  const check = async () => { if (!f.schedule_expr) return setPreview(null); try { setPreview(await mutate("/api/v1/jobs/schedule/preview", "post", { query: { expr: f.schedule_expr, tz: f.tz } }) as { human: string }); } catch { setPreview({ human: "Invalid expression" }); } };
   return (
     <div className="mb-4 rounded-lg border border-line bg-panel p-4">
       <div className="grid gap-3 sm:grid-cols-2">
