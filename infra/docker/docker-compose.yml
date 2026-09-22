@@ -56,7 +56,10 @@ services:
     depends_on: {postgres: {condition: service_healthy}}
   ingest:
     build: {context: ../.., dockerfile: infra/docker/Dockerfile.api}
-    command: uvicorn cronsentinel.ingest_main:app --host 0.0.0.0 --port 8010
+    # R22: ingest is one uvicorn process by default — on the test box it saturated one core at
+    # ~190 pings/s or ~1.4k events/s (batched). INGEST_WORKERS adds processes. Multi-worker was NOT
+    # measured (1 vCPU sandbox); each worker opens its own NATS connection and DB pool (10 + 20).
+    command: sh -c "uvicorn cronsentinel.ingest_main:app --host 0.0.0.0 --port 8010 --workers $${INGEST_WORKERS:-1}"
     environment: *api-env
     ports: ["8010:8010"]
     depends_on: [api]

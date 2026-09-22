@@ -44,7 +44,7 @@ up() {
     echo "started $name (pid $!)"
   done
   for url in "http://127.0.0.1:$API_PORT/healthz" "http://127.0.0.1:$INGEST_PORT/healthz"; do
-    for _ in $(seq 1 40); do curl -sf "$url" >/dev/null && break; sleep 0.5; done
+    for _ in $(seq 1 120); do curl -sf "$url" >/dev/null && break; sleep 0.5; done  # 60s: slow boxes
     curl -sf "$url" >/dev/null || { echo "not healthy: $url — see $RUN/*.log"; exit 1; }
   done
   echo "up — logs in $RUN"

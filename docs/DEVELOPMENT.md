@@ -640,3 +640,11 @@ design in `docs/SECURITY.md`. 449 backend tests (28 s, was ~190 s) + 6 full-chai
 **Deploy notes:** 0011 needs PostgreSQL 16 and a migration user able to create roles (0007 already
 required this). Existing keys keep working. Do not grant `jobwatch_system` to anything with
 INHERIT TRUE.
+
+## R22 — ingest HTTP load
+
+`scripts/ingest_loadtest.py`; results and caveats in `docs/LOADTEST.md`. `/agent/v1/events` now
+resolves a batch in two queries off the event loop and releases its DB connection before
+publishing (620 → 1,447 events/s on the test box). Heartbeat auth moved off the loop. First tests
+for `/agent/v1/events`, verified against the old handler too. `INGEST_WORKERS` knob in compose.
+`fullstack.sh` health wait widened to 60 s after the API outlasted 20 s on a loaded box.

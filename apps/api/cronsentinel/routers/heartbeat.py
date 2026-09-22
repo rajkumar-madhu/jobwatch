@@ -3,6 +3,7 @@ import json
 from datetime import UTC, datetime
 
 import redis
+from starlette.concurrency import run_in_threadpool
 from fastapi import APIRouter, HTTPException, Request
 from sqlalchemy import text
 
@@ -29,8 +30,14 @@ def _resolve(token: str) -> tuple[str, str]:
 
 
 async def _emit(request: Request, token: str, body: HeartbeatBody):
-    org, job = _resolve(token)
-    ratelimit.check(f"hb:{token}", settings.ingest_rate_per_min, request)
+    # R22: token resolution (Redis, DB on a miss) and the rate-limit INCR are synchronous network
+    # calls. Run on the event loop they serialise every request in the process behind them — tiny
+    # against local Redis, a hard ceiling against a remote one. One threadpool hop for both.
+    def _auth():
+        o, j = _resolve(token)
+        ratelimit.check(f"hb:{token}", settings.ingest_rate_per_min, request)
+        return o, j
+    org, job = await run_in_threadpool(_auth)
     ev = {
         "org_id": org, "job_id": job, "kind": body.status, "execution_id": body.execution_id,
         "sequence": body.sequence, "agent_ts": body.agent_ts.isoformat() if body.agent_ts else None,
@@ -43,8 +50,10 @@ async def _emit(request: Request, token: str, body: HeartbeatBody):
         await js.publish(f"exec.{org}", json.dumps(ev).encode())
     else:  # TODO: remove sync fallback once NATS is mandatory in all envs
         from ..processor import process
-        with system_session() as s:
-            process(s, ev)
+        def _inline():
+            with system_session() as s:
+                process(s, ev)
+        await run_in_threadpool(_inline)
     return {"ok": True, "execution_id": body.execution_id}
 
 

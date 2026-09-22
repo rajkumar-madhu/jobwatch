@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 import redis
+from starlette.concurrency import run_in_threadpool
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import text
@@ -186,36 +187,63 @@ class EventsIn(BaseModel):
 
 @agent.post("/events")
 async def events(body: EventsIn, request: Request, a: dict = Depends(agent_principal)):
-    """Batch of wrapper/passive events. Resolves job by token or fingerprint, publishes to NATS."""
+    """Batch of wrapper/passive events. Resolves job by token or fingerprint, publishes to NATS.
+
+    R22 (ingest load test): this used to open a DB session, run one lookup query *per event*, and
+    keep the session — and its pooled connection — open across every `await js.publish`. A
+    50-event batch took ~1.5 s and pinned a connection the whole time, so ~30 concurrent agent
+    flushes exhausted the pool (10 + 20 overflow). Now all tokens and fingerprints resolve in two
+    queries inside a threadpool (off the event loop), the connection is released, and only then is
+    anything published. Publishing stays sequential on purpose: one batch can carry start and
+    success for the same execution, and the processor should see them in order.
+    """
     org, aid = a["org_id"], a["agent_id"]
     now = datetime.now(UTC)
-    accepted = dropped = 0
+    evs = body.events[:500]
+    toks = sorted({e["job_token"] for e in evs if e.get("job_token")})
+    fps = sorted({e["fingerprint"] for e in evs if e.get("fingerprint")})
+    progress = [e for e in evs if e.get("kind") == "progress"]
     js = request.app.state.js
-    with system_session() as s:
-        for e in body.events[:500]:
-            job_id = None
-            if e.get("job_token"):
-                job_id = s.execute(text("SELECT id FROM jobs WHERE org_id=:o AND heartbeat_token=:t"), {"o": org, "t": e["job_token"]}).scalar()
-            if not job_id and e.get("fingerprint"):
-                job_id = s.execute(text("SELECT id FROM jobs WHERE org_id=:o AND fingerprint=:f"), {"o": org, "f": e["fingerprint"]}).scalar()
-            if not job_id:
-                dropped += 1; continue  # unknown job: wait for next discovery cycle
-            kind = e.get("kind")
-            if kind == "progress":
-                s.execute(text("INSERT INTO execution_events (org_id, execution_id, agent_id, sequence, kind, agent_ts, payload) VALUES (:o, :eid, :a, :seq, 'progress', :ts, '{}') ON CONFLICT DO NOTHING"),
-                          {"o": org, "eid": e["execution_id"], "a": aid, "seq": e.get("sequence", 0), "ts": e.get("agent_ts")})
-                accepted += 1; continue
-            ev = {"org_id": org, "job_id": str(job_id), "agent_id": aid, "kind": kind, "execution_id": e.get("execution_id"), "sequence": e.get("sequence", 0),
-                  "agent_ts": e.get("agent_ts"), "server_ts": now.isoformat(), "duration_ms": e.get("duration_ms"), "exit_code": e.get("exit_code"),
-                  "host": e.get("host"), "stdout_tail": e.get("stdout_tail"), "stderr_tail": e.get("stderr_tail"),
-                  "meta": {**(e.get("meta") or {}), "env_var_names": e.get("env_var_names") or []}}
-            if js is not None:
-                await js.publish(f"exec.{org}", json.dumps(ev).encode())
-            else:
-                from ..processor import process
-                process(s, ev)
-            accepted += 1
-        s.execute(text("UPDATE agents SET last_seen_at=now() WHERE id=:a"), {"a": aid})
+
+    def _resolve() -> tuple[dict, dict]:
+        with system_session() as s:
+            by_tok = dict(s.execute(text("SELECT heartbeat_token, id FROM jobs WHERE org_id=:o AND heartbeat_token = ANY(:t)"),
+                                    {"o": org, "t": toks}).all()) if toks else {}
+            by_fp = dict(s.execute(text("SELECT fingerprint, id FROM jobs WHERE org_id=:o AND fingerprint = ANY(:f)"),
+                                   {"o": org, "f": fps}).all()) if fps else {}
+            if progress:
+                s.execute(text("INSERT INTO execution_events (org_id, execution_id, agent_id, sequence, kind, agent_ts, payload) "
+                               "VALUES (:o, :eid, :a, :seq, 'progress', :ts, '{}') ON CONFLICT DO NOTHING"),
+                          [{"o": org, "eid": e["execution_id"], "a": aid, "seq": e.get("sequence", 0), "ts": e.get("agent_ts")} for e in progress])
+            s.execute(text("UPDATE agents SET last_seen_at=now() WHERE id=:a"), {"a": aid})
+        return by_tok, by_fp
+
+    by_tok, by_fp = await run_in_threadpool(_resolve)
+    accepted = dropped = 0
+    out = []
+    for e in evs:
+        job_id = by_tok.get(e.get("job_token")) or by_fp.get(e.get("fingerprint"))
+        if not job_id:
+            dropped += 1; continue  # unknown job: wait for next discovery cycle
+        kind = e.get("kind")
+        if kind == "progress":
+            accepted += 1; continue  # stored above
+        out.append({"org_id": org, "job_id": str(job_id), "agent_id": aid, "kind": kind, "execution_id": e.get("execution_id"),
+                    "sequence": e.get("sequence", 0), "agent_ts": e.get("agent_ts"), "server_ts": now.isoformat(),
+                    "duration_ms": e.get("duration_ms"), "exit_code": e.get("exit_code"), "host": e.get("host"),
+                    "stdout_tail": e.get("stdout_tail"), "stderr_tail": e.get("stderr_tail"),
+                    "meta": {**(e.get("meta") or {}), "env_var_names": e.get("env_var_names") or []}})
+        accepted += 1
+    if js is not None:
+        for ev in out:
+            await js.publish(f"exec.{org}", json.dumps(ev).encode())
+    elif out:  # no broker (tests / degraded mode): process inline, still off the event loop
+        def _inline():
+            from ..processor import process
+            with system_session() as s:
+                for ev in out:
+                    process(s, ev)
+        await run_in_threadpool(_inline)
     return {"accepted": accepted, "dropped": dropped}
 
 

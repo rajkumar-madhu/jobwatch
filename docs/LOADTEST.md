@@ -102,6 +102,40 @@ place on first use.
 No caching was added: at these numbers it is not yet needed, and caching the slow version would
 have hidden both problems. The integration suite went from ~190 s to 28 s — argon2 was most of it.
 
+## R22 — ingest under concurrent HTTP load
+
+`apps/api/scripts/ingest_loadtest.py` drives the running ingest service the way clients do: cron
+one-liner pings (`GET /ping/{token}`), agent event batches (`POST /agent/v1/events`), and a
+`/healthz` probe every 100 ms as a head-of-line-blocking detector. Load generator, ingest,
+Postgres, NATS and six workers all share the one vCPU, so these understate a real deployment.
+
+| Scenario | Before | After |
+|---|---|---|
+| 20 concurrent, 20% batches of 50 | 620 events/s, batch p50 1,470 ms | **1,447 events/s**, batch p50 470 ms |
+| 20 concurrent, pings only | 219 req/s | 186 req/s (noise, or the threadpool hop on 1 vCPU — not a win) |
+| 60 concurrent, 30% batches | not run on the old code | 1,124 events/s, 0 errors; p95 ~2.2 s (CPU-saturated) |
+
+**What was wrong in `/agent/v1/events`:** one un-cached lookup query per event (pings use Redis,
+batches did not), and a DB session — with its pooled connection — held open across every
+`await js.publish` for the whole batch (~1.5 s for 50 events). Now tokens and fingerprints resolve
+in two `= ANY(...)` queries in a threadpool, the connection is released, then events publish in
+order (a batch can hold start + success for one execution). Heartbeat token resolution and the
+rate-limit `INCR` also moved off the event loop.
+
+**Corrections to my own predictions, recorded so they are not repeated:**
+- I expected head-of-line stalls of ~1.4 s. The probe peaked ~200 ms: each `await publish` yields
+  the loop between events, so the blocking was fine-grained. Real, but smaller than predicted.
+- Connection-pool exhaustion at ~30 concurrent batches is inferred from pool size × hold time;
+  the old code was not run at that concurrency, so it is not a demonstrated before/after.
+
+**No test covered `/agent/v1/events` before R22** — the R9 route smoke suite walks the main API,
+not ingest. `tests/integration/test_agent_events.py` now does (token and fingerprint resolution,
+unknown jobs dropped, progress stored, start+success ordering, cross-org isolation, bad key). It
+passes on both the old and new handler, so the rewrite is behaviour-preserving.
+
+**Deployment:** ingest runs one uvicorn process by default. `INGEST_WORKERS` in compose adds
+processes; multi-worker throughput was not measured here.
+
 ## Open findings (not fixed)
 
 - **`/analytics/overview` shows one ~4 s request out of 20** in two separate runs (p95 = max), apparently
@@ -110,5 +144,5 @@ have hidden both problems. The integration suite went from ~190 s to 28 s — ar
   slots, which the reconciler then marks missed — a missed-alert storm after a long outage, even
   for runs that did happen but were never attached to a slot. R3 behaviour; needs a decision
   (e.g. backfill only as far as the last recorded execution).
-- **Not load-tested:** ingest HTTP throughput under concurrency, NATS consumer lag, the notifier
+- **Not load-tested:** multi-worker / multi-replica ingest, NATS consumer lag, the notifier
   under an alert storm, and partition growth / retention at months of data.
