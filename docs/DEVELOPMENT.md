@@ -648,3 +648,11 @@ resolves a batch in two queries off the event loop and releases its DB connectio
 publishing (620 → 1,447 events/s on the test box). Heartbeat auth moved off the loop. First tests
 for `/agent/v1/events`, verified against the old handler too. `INGEST_WORKERS` knob in compose.
 `fullstack.sh` health wait widened to 60 s after the API outlasted 20 s on a loaded box.
+
+## R23 — hourly housekeeping
+
+Scorer split into failure-isolated phases with short transactions (heartbeat wait during a 1.7M-row
+retention delete: 3.6–4.9 s → 0.06 s). Migration 0012: `ensure_month_partition` rescues rows
+stranded in the default partition instead of failing forever; `drop_partition_if_empty()` lets the
+system role reclaim emptied month partitions. Numbers and the trade-off (slower wall time) in
+`docs/LOADTEST.md`. Also re-ran the full chain owed from R22 (6/6).

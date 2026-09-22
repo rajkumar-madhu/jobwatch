@@ -136,6 +136,44 @@ passes on both the old and new handler, so the rewrite is behaviour-preserving.
 **Deployment:** ingest runs one uvicorn process by default. `INGEST_WORKERS` in compose adds
 processes; multi-worker throughput was not measured here.
 
+## R23 — retention and hourly housekeeping
+
+The hourly scorer (reliability score, usage metering, partitions, retention) ran as **one
+transaction**. The score `UPDATE` locks every job row until commit, and `recompute_state` — every
+heartbeat — takes `FOR UPDATE` on job rows.
+
+At 10k jobs with nothing to delete the tick took 1.1 s and a heartbeat waited 0.1 s: real shape,
+no real harm. With one tenant downgraded business → free (365 → 7 days, 1,728,000 executions to
+delete), heartbeats for its jobs **waited 3.6 s and 4.9 s** (probes fired 2.5 s and 4 s into the
+tick). A first probe at 1 s showed only 0.1 s — it raced the score `UPDATE` and got the row first;
+recorded because the first number was misleading.
+
+| | Before | After |
+|---|---|---|
+| Heartbeat wait during a 1.7M-row retention delete | 3.6–4.9 s | max 0.06 s over 205 probes |
+| Scorer wall time for that tick | 5.9–8.9 s | 53 s |
+
+The wall-time increase is the trade: batched deletes (20k rows, each its own transaction) re-find
+their rows every batch, ~32k rows/s here. Retention has a 10-minute budget per hour and resumes on
+the next tick, so a very large downgrade drains over hours without blocking anything.
+
+**Partition trap (fixed, migration 0012).** Once any row sits in `<parent>_default` for a month
+without a partition, creating that partition fails with `CheckViolation`, every time. Reached by
+scorer downtime across a month boundary, or by one agent with a skewed clock reporting a run
+months ahead. Inside the old single transaction it stopped scoring, usage and retention
+permanently. `ensure_month_partition` now moves stranded rows into the new partition and attaches
+it; partitions are ensured three months ahead, each in its own transaction.
+
+**Partition drop.** Retention is per plan (7–365 days, enterprise unlimited), so partitions cannot
+be dropped by age — a month only becomes droppable once it is empty. `drop_partition_if_empty()`
+(SECURITY DEFINER; the app roles cannot drop tables they do not own — found by the tests) drops
+empty month partitions older than ~2 months. Enterprise data keeps old partitions alive, as it
+should.
+
+Also: retention deletes now take each batch's `execution_logs` with them, replacing an hourly
+anti-join over the entire logs table; every phase is failure-isolated, so one broken phase logs an
+error and the rest still run.
+
 ## Open findings (not fixed)
 
 - **`/analytics/overview` shows one ~4 s request out of 20** in two separate runs (p95 = max), apparently
@@ -144,5 +182,7 @@ processes; multi-worker throughput was not measured here.
   slots, which the reconciler then marks missed — a missed-alert storm after a long outage, even
   for runs that did happen but were never attached to a slot. R3 behaviour; needs a decision
   (e.g. backfill only as far as the last recorded execution).
+- **Usage metering** still sums `length(content)` over all of a tenant's `execution_logs` every
+  hour — a full scan that grows with log volume. Needs an incremental counter.
 - **Not load-tested:** multi-worker / multi-replica ingest, NATS consumer lag, the notifier
   under an alert storm, and partition growth / retention at months of data.
