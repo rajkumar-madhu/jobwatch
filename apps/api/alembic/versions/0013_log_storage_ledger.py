@@ -100,22 +100,41 @@ def upgrade():
     """)
     # Re-own DML-only definer functions (see docstring). A non-superuser migration role must be able
     # to SET ROLE jobwatch_system to hand ownership to it; INHERIT FALSE keeps it from acting as it.
+    #
+    # ALTER FUNCTION ... OWNER TO also requires the *new* owner to hold CREATE on the function's
+    # schema — Postgres's own rule, skipped only for a superuser session. jobwatch_system was never
+    # granted CREATE on public (0011 granted USAGE only), so under a non-superuser migration owner
+    # every one of these ALTERs below would fail with "permission denied for schema public" — this
+    # migration has never actually completed for a non-superuser owner, anywhere. Fixed by granting
+    # CREATE for the duration of this transaction only, then revoking it: the grant and revoke commit
+    # atomically with the rest of this migration, so no other session ever observes jobwatch_system
+    # holding CREATE, and its standing privileges stay exactly as documented in migration 0011.
     op.execute("""
     DO $$ BEGIN
       IF NOT (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) THEN
         EXECUTE format('GRANT jobwatch_system TO %I WITH INHERIT FALSE, SET TRUE', current_user);
       END IF;
     END $$;
+    GRANT CREATE ON SCHEMA public TO jobwatch_system;
     ALTER FUNCTION purge_job(uuid) OWNER TO jobwatch_system;
     ALTER FUNCTION purge_org(uuid) OWNER TO jobwatch_system;
     ALTER FUNCTION execution_logs_storage_ins() OWNER TO jobwatch_system;
     ALTER FUNCTION execution_logs_storage_del() OWNER TO jobwatch_system;
     ALTER FUNCTION execution_logs_storage_upd() OWNER TO jobwatch_system;
     ALTER FUNCTION prune_status_page_job() OWNER TO jobwatch_system;   -- R11 status-page trigger, same bug
+    REVOKE CREATE ON SCHEMA public FROM jobwatch_system;
     """)
 
 
 def downgrade():
+    # Reassigning ownership FROM jobwatch_system BACK to the migration owner needs the acting role
+    # to be able to SET ROLE to that owner — which needs the owner to hold SET-able membership IN
+    # jobwatch_system pointing the other way. But upgrade() already grants migrator -> jobwatch_system,
+    # and Postgres's role graph is acyclic: it will not also allow jobwatch_system -> migrator while
+    # that stands. There is no non-superuser path through this specific reversal; unlike upgrade(),
+    # this downgrade requires a superuser (or existing-owner) connection. R28's non-superuser CI
+    # change only needs the upgrade path — a fresh deployment never downgrades — so this is a known,
+    # accepted limit, not an oversight. See docs/DEVELOPMENT.md.
     op.execute("ALTER FUNCTION purge_job(uuid) OWNER TO CURRENT_USER; ALTER FUNCTION purge_org(uuid) OWNER TO CURRENT_USER; "
                "ALTER FUNCTION prune_status_page_job() OWNER TO CURRENT_USER;")
     op.execute("""

@@ -704,3 +704,25 @@ down → 3 recovered, 43 honest misses, 0 unobserved; ingest down → 3 recovere
 
 Also fixed: `test_wrong_agent_key_is_rejected` flipped the key's last hex char to "0"; one run in
 16 it already was "0" and the "wrong" key was the right key — a 200 that read like an auth hole.
+
+## R28 — CI migrations as a non-superuser owner
+
+Migration 0013 (R24's storage metering) had never actually completed under a non-superuser owner,
+anywhere — sandbox, CI, and default compose all run migrations as a superuser, and Postgres skips
+the "new owner must have CREATE on the schema" check entirely for a superuser session. Its five
+`ALTER FUNCTION ... OWNER TO jobwatch_system` calls would have failed with "permission denied for
+schema public" the first time anyone ran the chain as a real non-superuser owner. Fixed by granting
+`jobwatch_system` `CREATE` on schema `public` for the duration of that one transaction, then revoking
+it — the grant and revoke commit atomically with the rest of the migration, so no other session ever
+observes the standing privilege change. This is an in-place edit to an already-numbered migration,
+which this project otherwise treats as immutable — justified here because the broken path has never
+completed successfully anywhere, so there is no deployed behavior to preserve.
+
+CI (`ci.yml`) now runs a second, separate check: bootstrap a non-superuser `migrator` role on a
+throwaway database and run `alembic upgrade head` as it. This is upgrade-only. The migration's own
+downgrade (handing ownership back from `jobwatch_system` to the migration owner) hits a genuine
+Postgres structural limit under non-superuser: `ALTER FUNCTION ... OWNER TO X` requires the acting
+role to be able to `SET ROLE X`, and Postgres's role membership graph is acyclic, so it will not
+also grant `jobwatch_system -> migrator` membership while `migrator -> jobwatch_system` (needed for
+the upgrade) already exists. A fresh deployment only ever upgrades, so this is scoped intentionally,
+not an oversight — see migration 0013's `downgrade()` comment.
