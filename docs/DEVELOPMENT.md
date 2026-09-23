@@ -847,3 +847,23 @@ Responses with no `response_model` (the R14/R15 `UNMODELLED` list: schedule prev
 bootstrap/rotate, billing checkout/portal, destination test, copilot ask, `/auth/orgs`) come back
 as `unknown` and are cast at the call site, as before — the cast is now the visible marker of an
 unmodelled endpoint rather than an invisible default.
+
+## R33 — /product feature-tour page
+
+`app/(public)/product/page.tsx`: hero → sticky anchor bar (active section tracked with an
+IntersectionObserver) → eleven capability sections, alternating sides, each with a heading, a
+one-liner, four bullets, a link into the corresponding app page, and a product visual. The visuals
+are rendered in the page from the app's own tokens (window chrome, run strips, slot tables, an SVG
+bar chart) — no images and no third-party host, which the e2e sweep enforces for every page.
+
+Every bullet describes something the platform does today (R25's unobserved slots, R30's NATS
+destinations, R32's typed client, R11/R21 RLS, R16 Copilot egress, R18 SSRF guard). Nothing on the
+page is roadmap. `/welcome` links to it from the header; the FAQ there gained `id="faq"` for the
+hero's "How it works" link.
+
+`tests/e2e/pages.spec.ts` covers it on desktop and Pixel 7: no third-party request, no page error,
+all eleven sections present, anchor navigation lands the section in the viewport, every section's
+call-to-action is an in-app route. Desktop screenshot in `docs/screenshots/product-page.png`.
+
+Caught during review, not by the tests: on mobile the header wrapped mid-label ("Get / started").
+Fixed with `whitespace-nowrap` and hiding the secondary links below `sm`, matching `/welcome`.

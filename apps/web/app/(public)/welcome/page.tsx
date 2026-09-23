@@ -62,7 +62,7 @@ export default function Welcome() {
     <main className="bg-[radial-gradient(60%_50%_at_50%_0%,rgb(var(--accent)/.08),transparent)]">
       <header className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
         <span className="flex items-center gap-2 font-semibold"><span className="dot dot-healthy" />WeCrew JobWatch</span>
-        <nav className="flex items-center gap-5 text-sm"><a href="#how" className="hidden sm:inline">How it works</a><a href="#pricing" className="hidden sm:inline">Pricing</a><Link href="/tools/cron" className="hidden sm:inline">Cron checker</Link><Link href="/login" className="btn">Sign in</Link></nav>
+        <nav className="flex items-center gap-5 text-sm"><Link href="/product" className="hidden sm:inline">Product</Link><a href="#how" className="hidden sm:inline">How it works</a><a href="#pricing" className="hidden sm:inline">Pricing</a><Link href="/tools/cron" className="hidden sm:inline">Cron checker</Link><Link href="/login" className="btn">Sign in</Link></nav>
       </header>
 
       <section className="mx-auto max-w-6xl px-6 pb-16 pt-14">
@@ -115,7 +115,7 @@ export default function Welcome() {
       </section>
 
       <section className="border-t border-line bg-panel/60"><div className="mx-auto max-w-3xl px-6 py-16">
-        <h2 className="text-2xl font-semibold tracking-tight">Questions</h2>
+        <h2 id="faq" className="scroll-mt-16 text-2xl font-semibold tracking-tight">Questions</h2>
         <dl className="mt-6 divide-y divide-line">{FAQ.map(([q, a]) => <div key={q} className="py-4"><dt className="font-medium">{q}</dt><dd className="mt-1 text-mute">{a}</dd></div>)}</dl>
       </div></section>
 
