@@ -16,7 +16,7 @@ const SECTIONS: Sec[] = [
   { id: "schedule", nav: "Schedules", h: "Know what should have run, not just what did", lead: "Expected runs are materialised ahead of time, so silence is a signal too.",
     bullets: ["A slot for every scheduled run, with grace and deadline per job", "Late and missed detected from the timeline of what actually arrived", "Runs that landed while a slot did not exist yet are matched, not lost", "A slot nobody could have observed is marked unobserved — never a false missed"],
     to: "/jobs", toLabel: "Open jobs", shot: "schedule" },
-  { id: "alerting", nav: "Alerting", h: "Get told once, on the channel you use", lead: "Rules over job state, routed to Slack, email, PagerDuty or a webhook, with repeat intervals and quiet windows.",
+  { id: "alerting", nav: "Alerting", h: "Get told once, on the channel you use", lead: "Rules over job state, routed to Slack, Teams, Discord, Telegram, email or a webhook, with repeat intervals and quiet windows.",
     bullets: ["Conditions on state, consecutive failures and runtime, scoped by tag or workspace", "Every send recorded in a ledger you can read back", "Maintenance windows and paused jobs settle their slots as skipped, not missed", "An outage on our side never pages you — those slots are unobserved and say so"],
     to: "/alerting", toLabel: "Configure alerting", shot: "alerting" },
   { id: "incidents", nav: "Incidents", h: "Open, acknowledge, resolve — with the evidence attached", lead: "Failures are correlated into incidents so a bad night is one thread, not forty alerts.",

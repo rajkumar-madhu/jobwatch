@@ -867,3 +867,22 @@ call-to-action is an in-app route. Desktop screenshot in `docs/screenshots/produ
 
 Caught during review, not by the tests: on mobile the header wrapped mid-label ("Get / started").
 Fixed with `whitespace-nowrap` and hiding the secondary links below `sm`, matching `/welcome`.
+
+## R34 — /welcome rebuilt to match /product
+
+Sticky header, two-column hero with a dashboard mock (KPIs + the live feed), an honest proof strip,
+six feature cards that deep-link into `/product#<section>`, how-it-works with the pipeline visual,
+schedulers split into "discovered by the agent" vs "anything else via one heartbeat call", alerting
+and security columns, pricing, FAQ, closing CTA, and a real footer.
+
+Copy corrections while at it — the old page claimed things the code does not do:
+- "PagerDuty, Opsgenie" as native channels: the API's channel kinds are email, slack, teams,
+  discord, telegram, webhook. Now stated as "through their webhook intake". Same fix in `/product`.
+- "argon2-hashed keys": machine keys have been SHA-256 since R21 (argon2 cost ~181 ms per agent
+  heartbeat). Replaced with what is true: envelope-encrypted secrets, SSRF guard, RLS.
+- The fake counters ("12,842 jobs monitored", "43 incidents prevented today") and the illustrative
+  testimonials are gone. The proof strip states capabilities, not invented numbers.
+
+Pre-existing Pipeline visual: the animated packets overlapped node labels at phone width; hidden
+below `md`, nodes and connectors stay. Screenshot in `docs/screenshots/welcome-page.png`.
+50/50 Playwright.
