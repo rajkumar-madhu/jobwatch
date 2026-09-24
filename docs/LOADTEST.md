@@ -136,6 +136,85 @@ passes on both the old and new handler, so the rewrite is behaviour-preserving.
 **Deployment:** ingest runs one uvicorn process by default. `INGEST_WORKERS` in compose adds
 processes; multi-worker throughput was not measured here.
 
+## R23 — retention and hourly housekeeping
+
+The hourly scorer (reliability score, usage metering, partitions, retention) ran as **one
+transaction**. The score `UPDATE` locks every job row until commit, and `recompute_state` — every
+heartbeat — takes `FOR UPDATE` on job rows.
+
+At 10k jobs with nothing to delete the tick took 1.1 s and a heartbeat waited 0.1 s: real shape,
+no real harm. With one tenant downgraded business → free (365 → 7 days, 1,728,000 executions to
+delete), heartbeats for its jobs **waited 3.6 s and 4.9 s** (probes fired 2.5 s and 4 s into the
+tick). A first probe at 1 s showed only 0.1 s — it raced the score `UPDATE` and got the row first;
+recorded because the first number was misleading.
+
+| | Before | After |
+|---|---|---|
+| Heartbeat wait during a 1.7M-row retention delete | 3.6–4.9 s | max 0.06 s over 205 probes |
+| Scorer wall time for that tick | 5.9–8.9 s | 53 s |
+
+The wall-time increase is the trade: batched deletes (20k rows, each its own transaction) re-find
+their rows every batch, ~32k rows/s here. Retention has a 10-minute budget per hour and resumes on
+the next tick, so a very large downgrade drains over hours without blocking anything.
+
+**Partition trap (fixed, migration 0012).** Once any row sits in `<parent>_default` for a month
+without a partition, creating that partition fails with `CheckViolation`, every time. Reached by
+scorer downtime across a month boundary, or by one agent with a skewed clock reporting a run
+months ahead. Inside the old single transaction it stopped scoring, usage and retention
+permanently. `ensure_month_partition` now moves stranded rows into the new partition and attaches
+it; partitions are ensured three months ahead, each in its own transaction.
+
+**Partition drop.** Retention is per plan (7–365 days, enterprise unlimited), so partitions cannot
+be dropped by age — a month only becomes droppable once it is empty. `drop_partition_if_empty()`
+(SECURITY DEFINER; the app roles cannot drop tables they do not own — found by the tests) drops
+empty month partitions older than ~2 months. Enterprise data keeps old partitions alive, as it
+should.
+
+Also: retention deletes now take each batch's `execution_logs` with them, replacing an hourly
+anti-join over the entire logs table; every phase is failure-isolated, so one broken phase logs an
+error and the rest still run.
+
+## R24 — usage metering
+
+Hourly metering ran one `sum(length(content))` subquery per organisation over `execution_logs`,
+which had **no index on `org_id`** — a full table scan per org, so cost = orgs × total log rows.
+6.0 s at 98k rows / 50 orgs. The same missing index made tenant log reads full cross-tenant scans
+(a common search term hid it: `LIMIT 200` stops early; the plan showed the seq scan).
+
+Now an `org_id` index plus an append-only `storage_ledger` fed by statement-level triggers, folded
+into `org_storage` hourly: metering **6.0 s → 0.03 s**. A ledger rather than a per-org counter row,
+so a busy tenant's concurrent log writes don't serialise on one hot row. The meter now counts
+bytes (`octet_length`); the old one counted characters. Tests assert the meter equals a full
+recount after inserts, conflicts, updates, deletes, retention and purged orgs. One real bug caught
+on the way: a log-less org made the metering statement insert NULL and fail for every org.
+
+## R27 — the /analytics/overview outlier, diagnosed
+
+R19/R24 both saw one much-slower-than-usual request among many for `/analytics/overview` and
+recorded it as an unexplained cold-start guess. Diagnosed now (`scripts/diagnose_overview_outlier.py`).
+
+Ruled out first: the endpoint's slowest sub-query (7-day p95 duration by job) is correctly indexed
+and takes 20-30ms warm — `EXPLAIN (ANALYZE, BUFFERS)` shows an all-`shared hit` plan, no disk reads.
+Run alone in a tight loop with nothing else active, 40 reps never exceed 28ms.
+
+Run against the live full-stack instead (API + generator + reconciler + celery, as production
+actually runs it) with per-request timestamps, spikes appeared in bursts, and those bursts line up
+exactly with entries in the worker logs at the same second: the reconciler's state-recompute pass
+(`reconciled changes=1369 jobs=1400 took_s=45.38`) and a celery outbound-delivery retry burst.
+
+Conclusion: this is CPU contention for the test box's **one vCPU** between the API process and the
+background workers, not a query, index, or plan problem — nothing to fix in `/analytics/overview`
+itself. Consistent with this doc's own opening caveat: *numbers are a floor, not a capacity plan*.
+On a box with API and workers on separate cores (any real deployment), this does not occur. The
+magnitude here (100-120ms) is smaller than the originally reported outlier because this box's
+reconciler pass was smaller (1,400 jobs, not R19/R24's larger load runs) — the mechanism is the
+same, and a bigger concurrent pass would compound it further.
+
+**Not a fix, but worth having:** if this ever needs bounding without more hardware, the reconciler
+could yield the CPU between its per-job recompute calls (`asyncio.sleep(0)` inside the batch loop),
+trading a slower reconciler pass for a steadier API tail latency. Not implemented — no evidence yet
+that anyone is hitting this outside a 1-vCPU test box.
+
 ## Open findings (not fixed)
 
 - **`/analytics/overview` shows one ~4 s request out of 20** in two separate runs (p95 = max), apparently

@@ -1,7 +1,7 @@
 "use client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { api } from "@/lib/api";
+import { api, mutate } from "@/lib/api";
 import { Page, ErrorBox, Empty } from "@/components/ui";
 import { ago } from "@/lib/format";
 
@@ -16,10 +16,10 @@ export default function IntegrationsPage() {
   const deliveries = useQuery({ queryKey: ["sig-deliveries"], queryFn: () => api<Delivery[]>("/api/v1/integrations/deliveries?limit=50"), refetchInterval: 15000 });
   const [f, setF] = useState({ name: "", url: "", secret: "", event_types: [] as string[] });
   const [testRes, setTestRes] = useState<Record<string, string>>({});
-  const create = useMutation({ mutationFn: () => api("/api/v1/integrations/destinations", { method: "POST", body: JSON.stringify({ ...f, secret: f.secret || null }) }),
+  const create = useMutation({ mutationFn: () => mutate("/api/v1/integrations/destinations", "post", { body: { ...f, secret: f.secret || null } }),
     onSuccess: () => { setF({ name: "", url: "", secret: "", event_types: [] }); qc.invalidateQueries({ queryKey: ["sig-dests"] }); } });
-  const del = useMutation({ mutationFn: (id: string) => api(`/api/v1/integrations/destinations/${id}`, { method: "DELETE" }), onSuccess: () => qc.invalidateQueries({ queryKey: ["sig-dests"] }) });
-  const test = useMutation({ mutationFn: (id: string) => api<any>(`/api/v1/integrations/destinations/${id}/test`, { method: "POST" }),
+  const del = useMutation({ mutationFn: (id: string) => mutate("/api/v1/integrations/destinations/{dest_id}", "delete", { path: { dest_id: id } }), onSuccess: () => qc.invalidateQueries({ queryKey: ["sig-dests"] }) });
+  const test = useMutation({ mutationFn: (id: string) => mutate("/api/v1/integrations/destinations/{dest_id}/test", "post", { path: { dest_id: id } }) as Promise<any>,
     onSuccess: (r, id) => setTestRes((t) => ({ ...t, [id]: r.ok ? `OK (${r.status_code})` : `Failed: ${r.error ?? r.status_code}` })) });
   const inp = "mt-1 w-full rounded-md border border-line bg-panel px-2 py-1.5 text-sm";
   const types: string[] = schema.data?.event_types ?? [];

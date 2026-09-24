@@ -1024,7 +1024,7 @@ export interface paths {
         put?: never;
         /**
          * Test Destination
-         * @description Synchronous test: sends a job.state_changed sample and reports the response code.
+         * @description Synchronous test: sends a job.state_changed sample and reports the outcome.
          */
         post: operations["test_destination_api_v1_integrations_destinations__dest_id__test_post"];
         delete?: never;
@@ -1045,6 +1045,57 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/platform/monitoring-gaps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Monitoring Gaps */
+        get: operations["monitoring_gaps_api_v1_platform_monitoring_gaps_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/org/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Export Org */
+        get: operations["export_org_api_v1_org_export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/org/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Org */
+        delete: operations["delete_org_api_v1_org__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1142,7 +1193,7 @@ export interface components {
              * Jobs
              * @default 0
              */
-            jobs: number;
+            jobs?: number;
         };
         /** AlertRuleOut */
         AlertRuleOut: {
@@ -1162,7 +1213,7 @@ export interface components {
              * Scope
              * @default {}
              */
-            scope: {
+            scope?: {
                 [key: string]: unknown;
             };
             /** Condition */
@@ -1171,7 +1222,7 @@ export interface components {
              * Params
              * @default {}
              */
-            params: {
+            params?: {
                 [key: string]: unknown;
             };
             /** Severity */
@@ -1180,7 +1231,7 @@ export interface components {
              * Channel Ids
              * @default []
              */
-            channel_ids: string[];
+            channel_ids?: string[];
             /** Business Hours */
             business_hours?: {
                 [key: string]: unknown;
@@ -1203,7 +1254,7 @@ export interface components {
              * Role
              * @default developer
              */
-            role: string;
+            role?: string;
         };
         /** AskIn */
         AskIn: {
@@ -1222,7 +1273,7 @@ export interface components {
              * Ttl Hours
              * @default 24
              */
-            ttl_hours: number;
+            ttl_hours?: number;
         };
         /** ChannelIn */
         ChannelIn: {
@@ -1238,7 +1289,7 @@ export interface components {
              * Rate Per Min
              * @default 30
              */
-            rate_per_min: number;
+            rate_per_min?: number;
         };
         /** ChannelOut */
         ChannelOut: {
@@ -1282,17 +1333,22 @@ export interface components {
              * Cronjobs
              * @default 0
              */
-            cronjobs: number;
+            cronjobs?: number;
             /**
              * Failing
              * @default 0
              */
-            failing: number;
+            failing?: number;
         };
         /** CreateOrg */
         CreateOrg: {
             /** Name */
             name: string;
+        };
+        /** DeleteOrgIn */
+        DeleteOrgIn: {
+            /** Confirm Slug */
+            confirm_slug: string;
         };
         /** DepIn */
         DepIn: {
@@ -1326,12 +1382,12 @@ export interface components {
              * Nodes
              * @default []
              */
-            nodes: components["schemas"]["DependencyNode"][];
+            nodes?: components["schemas"]["DependencyNode"][];
             /**
              * Edges
              * @default []
              */
-            edges: components["schemas"]["DependencyEdge"][];
+            edges?: components["schemas"]["DependencyEdge"][];
         };
         /** DependencyNode */
         DependencyNode: {
@@ -1355,11 +1411,8 @@ export interface components {
              * Kind
              * @default webhook
              */
-            kind: string;
-            /**
-             * Url
-             * Format: uri
-             */
+            kind?: string;
+            /** Url */
             url: string;
             /** Secret */
             secret?: string | null;
@@ -1367,24 +1420,28 @@ export interface components {
              * Headers
              * @default {}
              */
-            headers: {
+            headers?: {
                 [key: string]: string;
             };
+            /** Subject Prefix */
+            subject_prefix?: string | null;
+            /** Token */
+            token?: string | null;
             /**
              * Event Types
              * @default []
              */
-            event_types: string[];
+            event_types?: string[];
             /**
              * Workspace Ids
              * @default []
              */
-            workspace_ids: string[];
+            workspace_ids?: string[];
             /**
              * Enabled
              * @default true
              */
-            enabled: boolean;
+            enabled?: boolean;
         };
         /** ExecutionOut */
         ExecutionOut: {
@@ -1455,7 +1512,7 @@ export interface components {
              * Affected Job Ids
              * @default []
              */
-            affected_job_ids: string[];
+            affected_job_ids?: string[];
             /** Job Names */
             job_names?: string[] | null;
             /** Root Cause */
@@ -1466,7 +1523,7 @@ export interface components {
              * Responder Ids
              * @default []
              */
-            responder_ids: string[];
+            responder_ids?: string[];
             /** Rule Id */
             rule_id?: string | null;
             /** Last Notified At */
@@ -1479,7 +1536,7 @@ export interface components {
              * Correlation Signals
              * @default []
              */
-            correlation_signals: {
+            correlation_signals?: {
                 [key: string]: unknown;
             }[];
         };
@@ -1502,7 +1559,7 @@ export interface components {
              * Tags
              * @default []
              */
-            tags: string[];
+            tags?: string[];
             /** Runs */
             runs: number;
             /** Ok */
@@ -1541,21 +1598,21 @@ export interface components {
              * Kind
              * @default heartbeat
              */
-            kind: string;
+            kind?: string;
             /** Schedule Expr */
             schedule_expr?: string | null;
             /**
              * Tz
              * @default UTC
              */
-            tz: string;
+            tz?: string;
             /** Expected Runtime S */
             expected_runtime_s?: number | null;
             /**
              * Grace S
              * @default 300
              */
-            grace_s: number;
+            grace_s?: number;
             /** Environment Id */
             environment_id?: string | null;
             /** Team Id */
@@ -1564,7 +1621,7 @@ export interface components {
              * Tags
              * @default []
              */
-            tags: string[];
+            tags?: string[];
             /** Sla Target */
             sla_target?: number | null;
         };
@@ -1652,12 +1709,12 @@ export interface components {
              * Items
              * @default []
              */
-            items: components["schemas"]["LogHit"][];
+            items?: components["schemas"]["LogHit"][];
             /**
              * Hosts
              * @default []
              */
-            hosts: string[];
+            hosts?: string[];
         };
         /** MaintenanceIn */
         MaintenanceIn: {
@@ -1665,7 +1722,7 @@ export interface components {
              * Scope
              * @default {}
              */
-            scope: {
+            scope?: {
                 [key: string]: unknown;
             };
             /**
@@ -1680,6 +1737,36 @@ export interface components {
             ends_at: string;
             /** Rrule */
             rrule?: string | null;
+        };
+        /**
+         * MonitoringGapOut
+         * @description R25: a period when the platform itself was not watching. Slots whose deadline fell inside it
+         *     are `unobserved`, never `missed`, and never alert.
+         */
+        MonitoringGapOut: {
+            /** Id */
+            id: number;
+            /** Service */
+            service: string;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /**
+             * Ended At
+             * Format: date-time
+             */
+            ended_at: string;
+            /** Slots Unobserved */
+            slots_unobserved: number;
+        };
+        /** MonitoringGapsOut */
+        MonitoringGapsOut: {
+            /** Gaps */
+            gaps: components["schemas"]["MonitoringGapOut"][];
+            /** Unobserved Slots 30D */
+            unobserved_slots_30d: number;
         };
         /** NamedMetric */
         NamedMetric: {
@@ -1699,10 +1786,7 @@ export interface components {
         OverviewOut: {
             /** Total Jobs */
             total_jobs: number;
-            /**
-             * By Status
-             * @default {}
-             */
+            /** By Status */
             by_status: {
                 [key: string]: number;
             };
@@ -1710,15 +1794,9 @@ export interface components {
             executions_today: number;
             /** Success Rate Today */
             success_rate_today?: number | null;
-            /**
-             * Top Slowest 7D
-             * @default []
-             */
+            /** Top Slowest 7D */
             top_slowest_7d: components["schemas"]["NamedMetric"][];
-            /**
-             * Top Failing 7D
-             * @default []
-             */
+            /** Top Failing 7D */
             top_failing_7d: components["schemas"]["NamedMetric"][];
             /** Mttd Min */
             mttd_min?: number | null;
@@ -1735,12 +1813,12 @@ export interface components {
              * Visibility
              * @default public
              */
-            visibility: string;
+            visibility?: string;
             /**
              * Job Ids
              * @default []
              */
-            job_ids: string[];
+            job_ids?: string[];
         };
         /** ResolveIn */
         ResolveIn: {
@@ -1759,26 +1837,26 @@ export interface components {
              * Scope
              * @default {}
              */
-            scope: {
+            scope?: {
                 [key: string]: unknown;
             };
             /**
              * Params
              * @default {}
              */
-            params: {
+            params?: {
                 [key: string]: unknown;
             };
             /**
              * Severity
              * @default medium
              */
-            severity: string;
+            severity?: string;
             /**
              * Channel Ids
              * @default []
              */
-            channel_ids: string[];
+            channel_ids?: string[];
             /** Business Hours */
             business_hours?: {
                 [key: string]: unknown;
@@ -1789,7 +1867,7 @@ export interface components {
              * Enabled
              * @default true
              */
-            enabled: boolean;
+            enabled?: boolean;
         };
         /** SeriesIncident */
         SeriesIncident: {
@@ -1803,12 +1881,12 @@ export interface components {
              * Points
              * @default []
              */
-            points: components["schemas"]["SeriesPoint"][];
+            points?: components["schemas"]["SeriesPoint"][];
             /**
              * Incidents
              * @default []
              */
-            incidents: components["schemas"]["SeriesIncident"][];
+            incidents?: components["schemas"]["SeriesIncident"][];
         };
         /** SeriesPoint */
         SeriesPoint: {
@@ -1879,7 +1957,7 @@ export interface components {
              * Event Types
              * @default []
              */
-            event_types: string[];
+            event_types?: string[];
             /** Workspace Ids */
             workspace_ids?: string[] | null;
             /** Enabled */
@@ -1888,7 +1966,7 @@ export interface components {
              * Consecutive Failures
              * @default 0
              */
-            consecutive_failures: number;
+            consecutive_failures?: number;
             /** Disabled Reason */
             disabled_reason?: string | null;
             /**
@@ -1900,19 +1978,26 @@ export interface components {
              * Sent 24H
              * @default 0
              */
-            sent_24h: number;
+            sent_24h?: number;
             /**
              * Failed 24H
              * @default 0
              */
-            failed_24h: number;
+            failed_24h?: number;
             /** Url */
             url?: string | null;
             /**
              * Has Secret
              * @default false
              */
-            has_secret: boolean;
+            has_secret?: boolean;
+            /** Subject Prefix */
+            subject_prefix?: string | null;
+            /**
+             * Has Token
+             * @default false
+             */
+            has_token?: boolean;
         };
         /** SignalSchemaOut */
         SignalSchemaOut: {
@@ -1950,7 +2035,7 @@ export interface components {
              * Job Ids
              * @default []
              */
-            job_ids: string[];
+            job_ids?: string[];
         };
         /** TopologyCluster */
         TopologyCluster: {
@@ -1967,7 +2052,7 @@ export interface components {
              * Namespaces
              * @default []
              */
-            namespaces: components["schemas"]["TopologyNamespace"][];
+            namespaces?: components["schemas"]["TopologyNamespace"][];
         };
         /** TopologyJob */
         TopologyJob: {
@@ -1991,7 +2076,7 @@ export interface components {
              * Jobs
              * @default []
              */
-            jobs: components["schemas"]["TopologyJob"][];
+            jobs?: components["schemas"]["TopologyJob"][];
         };
         /** TopologyOut */
         TopologyOut: {
@@ -1999,17 +2084,17 @@ export interface components {
              * Servers
              * @default []
              */
-            servers: components["schemas"]["TopologyServer"][];
+            servers?: components["schemas"]["TopologyServer"][];
             /**
              * Clusters
              * @default []
              */
-            clusters: components["schemas"]["TopologyCluster"][];
+            clusters?: components["schemas"]["TopologyCluster"][];
             /**
              * Heartbeat Only
              * @default []
              */
-            heartbeat_only: components["schemas"]["TopologyJob"][];
+            heartbeat_only?: components["schemas"]["TopologyJob"][];
             /** Status */
             status: string;
         };
@@ -2028,7 +2113,7 @@ export interface components {
              * Users
              * @default []
              */
-            users: components["schemas"]["TopologyUser"][];
+            users?: components["schemas"]["TopologyUser"][];
         };
         /** TopologyUser */
         TopologyUser: {
@@ -2040,7 +2125,7 @@ export interface components {
              * Jobs
              * @default []
              */
-            jobs: components["schemas"]["TopologyJob"][];
+            jobs?: components["schemas"]["TopologyJob"][];
         };
         /** ValidationError */
         ValidationError: {
@@ -4613,6 +4698,107 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["SignalDeliveryOut"][];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    monitoring_gaps_api_v1_platform_monitoring_gaps_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+                "x-org-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MonitoringGapsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_org_api_v1_org_export_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+                "x-org-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_org_api_v1_org__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+                "x-org-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeleteOrgIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

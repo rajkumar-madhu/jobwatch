@@ -5,6 +5,7 @@ import clsx from "clsx";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, type Overview } from "@/lib/api";
+import { apiUrl } from "@/lib/urls";
 import { Logo } from "@/components/brand";
 
 const GROUPS: [string, [string, string][]][] = [
@@ -40,7 +41,7 @@ export function Sidebar() {
   useEffect(() => setOpen(false), [path]);
   const { data } = useQuery({ queryKey: ["overview"], queryFn: () => api<Overview>("/api/v1/analytics/overview") });
   const bad = (data?.by_status.failed ?? 0) + (data?.by_status.missed ?? 0) + (data?.by_status.timeout ?? 0);
-  const signOut = async () => { await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/logout`, { method: "POST", credentials: "include" }); location.href = "/welcome"; };
+  const signOut = async () => { await fetch(apiUrl("/auth/logout"), { method: "POST", credentials: "include" }); location.href = "/welcome"; };
   return (
     <>
       <header className="sticky top-0 z-30 flex items-center justify-between border-b border-line bg-panel px-4 py-3 lg:hidden">

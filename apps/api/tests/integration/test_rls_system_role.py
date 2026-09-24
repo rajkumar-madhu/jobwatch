@@ -98,3 +98,25 @@ def test_tenant_query_uses_the_org_id_index(two_tenants):
         plan = "\n".join(r[0] for r in s.execute(text("EXPLAIN SELECT count(*) FROM jobs")).all())
     assert "Index" in plan and "org_id" in plan, plan
     assert "bypass" not in plan, plan
+
+
+# SECURITY DEFINER functions that do DDL (need table ownership, touch partitions directly where the
+# parent's RLS does not apply). Everything else that is SECURITY DEFINER must be owned by
+# jobwatch_system — see migration 0013.
+DDL_DEFINERS = {"ensure_month_partition", "drop_partition_if_empty"}
+
+
+def test_dml_definer_functions_are_owned_by_the_system_role():
+    """A definer function runs as its owner, and FORCE RLS applies to the owner unless it is a
+    superuser. Our test owners are superusers, so a wrongly-owned function works here and silently
+    does nothing on managed Postgres (demonstrated: purge deleted 0 of 5 rows). This checks the
+    ownership invariant directly, since the behaviour itself cannot be seen with a superuser owner."""
+    from cronsentinel.db import engine
+    with engine.connect() as c:
+        rows = c.execute(text("""SELECT p.proname, pg_get_userbyid(p.proowner) FROM pg_proc p
+            JOIN pg_namespace n ON n.oid = p.pronamespace
+            WHERE n.nspname = 'public' AND p.prosecdef""")).all()
+    wrong = sorted(f"{name} (owner {owner})" for name, owner in rows
+                   if name not in DDL_DEFINERS and owner != "jobwatch_system")
+    assert not wrong, f"SECURITY DEFINER functions that will hit FORCE RLS as a non-superuser owner: {wrong}"
+    assert {n for n, _ in rows} >= {"purge_job", "purge_org", "prune_status_page_job"}

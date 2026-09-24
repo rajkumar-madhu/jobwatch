@@ -1,11 +1,13 @@
 """Delivery of signals to tenant-configured destinations. Celery task, retried with backoff; a
 destination that fails 20 times in a row is auto-disabled with a reason so a dead AEGIS endpoint
 does not burn the queue forever."""
+import asyncio
 import hashlib
 import hmac
 import json
 
 import httpx
+import nats
 
 from .. import netguard
 import structlog
@@ -19,6 +21,7 @@ log = structlog.get_logger()
 MAX_ATTEMPTS = 6
 AUTO_DISABLE_AFTER = 20
 UA = "JobWatch-Signals/1"
+NATS_CONNECT_TIMEOUT_S = 5
 
 
 def sign(secret: str, raw: bytes) -> str:
@@ -36,6 +39,33 @@ def _post_webhook(cfg: dict, raw: bytes, signal_id: str) -> int:
     # because destinations saved before R18 were never validated.
     r = netguard.post(cfg["url"], content=raw, headers=headers, timeout=10)
     return r.status_code
+
+
+async def _publish_nats_async(cfg: dict, raw: bytes, signal_id: str, event_type: str) -> None:
+    # R18-equivalent for this destination kind: resolve and validate the host at connect time
+    # (netguard.resolve_nats_host), not only when the destination was saved — a destination saved
+    # before this could point anywhere, and DNS can change under a name that passed check_nats_url
+    # at save time. subject_prefix was already validated at save time (see integrations.py).
+    connect_url = netguard.resolve_nats_host(cfg["url"])
+    kw = {"servers": [connect_url], "connect_timeout": NATS_CONNECT_TIMEOUT_S, "max_reconnect_attempts": 0,
+          "allow_reconnect": False}
+    if cfg.get("token"):
+        kw["token"] = cfg["token"]
+    nc = await nats.connect(**kw)
+    try:
+        subject = f"{cfg['subject_prefix']}.{event_type}"
+        await nc.publish(subject, raw, headers={"Nats-Msg-Id": signal_id, "X-JobWatch-Schema": "jobwatch.signal/1"})
+        await nc.flush(timeout=NATS_CONNECT_TIMEOUT_S)  # confirms the server accepted it, not that a consumer got it
+    finally:
+        await nc.close()
+
+
+def _publish_nats(cfg: dict, raw: bytes, signal_id: str, event_type: str) -> None:
+    """R30: was `raise RuntimeError("nats destination not implemented")` since R4 — every tenant
+    with a nats destination has had every delivery fail, retry to exhaustion, and auto-disable.
+    One short-lived connection per delivery, same shape as _post_webhook's one POST per delivery:
+    no persistent async client to keep alive alongside the sync Celery worker pool."""
+    asyncio.run(_publish_nats_async(cfg, raw, signal_id, event_type))
 
 
 @celery.task(bind=True, max_retries=MAX_ATTEMPTS, autoretry_for=(Exception,), retry_backoff=5, retry_backoff_max=600, retry_jitter=True)
@@ -57,9 +87,8 @@ def deliver_signal(self, org_id: str, destination_id: str, envelope: dict):
             if code >= 400:
                 raise RuntimeError(f"HTTP {code}")
         elif dest.kind == "nats":
-            # TODO(R4): outbound NATS destination — publish to the tenant's own broker. Needs an async
-            # bridge in a Celery worker or a dedicated stream-to-stream forwarder. Webhook covers AEGIS today.
-            raise RuntimeError("nats destination not implemented")
+            _publish_nats(cfg, raw, sid, et)
+            code = None   # NATS core pub/sub has no response code; response_code stays NULL for this kind
         else:
             raise RuntimeError(f"unknown kind {dest.kind}")
         with system_session() as s:

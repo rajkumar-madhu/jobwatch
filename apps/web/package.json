@@ -8,7 +8,7 @@
     "lint": "next lint",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "types:gen": "openapi-typescript openapi.json -o lib/api-types.ts",
+    "types:gen": "openapi-typescript openapi.json -o lib/api-types.ts --default-non-nullable=false",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

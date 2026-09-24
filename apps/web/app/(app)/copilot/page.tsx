@@ -3,7 +3,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
-import { api } from "@/lib/api";
+import { api, mutate } from "@/lib/api";
 import { ago } from "@/lib/format";
 import { Page, ErrorBox } from "@/components/ui";
 
@@ -32,7 +32,7 @@ function CopilotInner() {
   const [q, setQ] = useState(sp.get("q") ?? "");
   const sug = useQuery({ queryKey: ["copilot-sug"], queryFn: () => api<{ questions: string[] }>("/api/v1/copilot/suggestions") });
   const hist = useQuery({ queryKey: ["copilot-hist"], queryFn: () => api<any[]>("/api/v1/copilot/history?limit=10") });
-  const ask = useMutation({ mutationFn: (question: string) => api<{ answer: Answer; context: any; model: string; latency_ms: number }>("/api/v1/copilot/ask", { method: "POST", body: JSON.stringify({ question, job_id: jobId, incident_id: incidentId }) }), onSuccess: () => hist.refetch() });
+  const ask = useMutation({ mutationFn: (question: string) => mutate("/api/v1/copilot/ask", "post", { body: { question, job_id: jobId, incident_id: incidentId } }) as Promise<{ answer: Answer; context: any; model: string; latency_ms: number }>, onSuccess: () => hist.refetch() });
   return (
     <Page title="AI Copilot">
       <p className="mb-4 text-sm text-mute">Answers come only from your telemetry (runs, logs, host metrics, Kubernetes events, deploys). Secrets are redacted before anything reaches the model. Nothing is executed on your systems.{(jobId || incidentId) && <> Scoped to {jobId ? <Link className="underline" href={`/jobs/${jobId}`}>this job</Link> : <Link className="underline" href={`/incidents/${incidentId}`}>this incident</Link>}.</>}</p>

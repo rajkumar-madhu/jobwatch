@@ -1,7 +1,7 @@
 "use client";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
-import { api, type Job, type Overview, type Incident } from "@/lib/api";
+import { api, type Job, type Overview, type Incident, type MonitoringGaps } from "@/lib/api";
 import { ago, dur } from "@/lib/format";
 import { Page, Status, Skeleton, ErrorBox, Empty } from "@/components/ui";
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis } from "recharts";
@@ -15,6 +15,9 @@ export default function OverviewPage() {
   const running = useQuery({ queryKey: ["jobs", "running"], queryFn: () => api<{ items: Job[] }>("/api/v1/jobs?status=running&limit=50") });
   const inc = useQuery({ queryKey: ["incidents", "open"], queryFn: () => api<Incident[]>("/api/v1/incidents?status=open&limit=5") });
   const series = useQuery({ queryKey: ["series", 7], queryFn: () => api<any>("/api/v1/analytics/series?days=7") });
+  // R25: if the platform itself was not watching, say so — those slots are "unobserved", not missed.
+  const gaps = useQuery({ queryKey: ["platform", "gaps"], staleTime: 300_000, queryFn: () => api<MonitoringGaps>("/api/v1/platform/monitoring-gaps") });
+  const recentGaps = (gaps.data?.gaps ?? []).filter((g) => Date.now() - new Date(g.ended_at).getTime() < 7 * 86_400_000);
   const pts = (series.data?.points ?? []).map((p: any) => ({ t: new Date(p.t).toLocaleDateString(undefined, { weekday: "short" }), ok: p.ok, failed: p.failed, missed: p.missed }));
 
   if (ov.error) return <Page title="Overview"><ErrorBox error={ov.error} /></Page>;
@@ -31,9 +34,16 @@ export default function OverviewPage() {
           : <><b className="text-bad">{bad} job{bad === 1 ? "" : "s"} need attention</b>{late > 0 && <>, {late} running late</>}. {d.executions_today} runs today, {d.success_rate_today}% succeeded.</>}
       </p>
 
+      {recentGaps.length > 0 && <div className="mb-6 rounded border border-warn/40 bg-warn/10 px-3 py-2 text-sm" data-testid="monitoring-gap">
+        <b>Monitoring gap on our side</b> — {recentGaps.map((g) => `${g.service} was not watching for ${dur(new Date(g.ended_at).getTime() - new Date(g.started_at).getTime())} (${ago(g.ended_at)})`).join("; ")}.
+        {" "}{gaps.data!.unobserved_slots_30d} scheduled run{gaps.data!.unobserved_slots_30d === 1 ? "" : "s"} could not be observed and were not alerted on.
+      </div>}
+
       {d && <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-        {([["healthy", "Healthy"], ["running", "Running"], ["late", "Late"], ["missed", "Missed"], ["failed", "Failed"]] as [string, string][]).map(([k, l]) => (
+        {([["healthy", "Healthy"], ["running", "Running"], ["late", "Late"], ["missed", "Missed"], ["failed", "Failed"], ["timeout", "Timed out"], ["paused", "Paused"]] as [string, string][]).map(([k, l]) => (
           <div key={k} className="card px-4 py-3"><div className="text-2xl font-semibold tabular-nums text-accent">{d.by_status[k] ?? 0}</div><div className="mt-1 flex items-center gap-1 text-xs text-mute"><span className={`dot dot-${k}`} />{l}</div></div>))}
+        <div className="card px-4 py-3"><div className="text-2xl font-semibold tabular-nums text-accent">{(d as any).mttd_min != null ? `${(d as any).mttd_min}m` : "—"}</div><div className="mt-1 text-xs text-mute">MTTD, 30d</div></div>
+        <div className="card px-4 py-3"><div className="text-2xl font-semibold tabular-nums text-accent">{(d as any).mttr_min != null ? `${(d as any).mttr_min}m` : "—"}</div><div className="mt-1 text-xs text-mute">MTTR, 30d</div></div>
       </div>}
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-[3fr_2fr]">
         <section>

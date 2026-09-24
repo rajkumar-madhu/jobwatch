@@ -23,13 +23,20 @@ func Fingerprint(hostID, user, cmd, schedule string) string {
 	return hex.EncodeToString(h[:])[:32]
 }
 
+// interpreters and wrappers are skipped when deriving a job name: `php artisan` → artisan, `cs-run -- x.sh` → x.sh.
+var interpreters = map[string]bool{
+	"sh": true, "bash": true, "zsh": true, "dash": true, "env": true, "nice": true, "ionice": true, "timeout": true, "flock": true, "chronic": true,
+	"python": true, "python3": true, "php": true, "node": true, "ruby": true, "perl": true, "java": true,
+	"cs-run": true, "cronsentinel-agent": true, "exec": true,
+}
+
 func nameFromCommand(cmd string) string {
 	f := strings.Fields(cmd)
 	for _, tok := range f {
 		if strings.HasPrefix(tok, "-") || strings.Contains(tok, "=") {
 			continue
 		}
-		if b := filepath.Base(tok); b != "sh" && b != "bash" && b != "python" && b != "python3" && b != "cs-run" && b != "cronsentinel-agent" {
+		if b := filepath.Base(tok); !interpreters[b] {
 			return b
 		}
 	}

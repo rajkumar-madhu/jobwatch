@@ -96,7 +96,14 @@ EXTERNAL = {
 PUBLIC = {"/healthz", "/readyz", "/metrics", "/public/status/{slug}", "/auth/logout",
           "/api/v1/integrations/schema"} | {"/auth/login", "/auth/callback", "/api/v1/billing/webhook"}
 # Writes that are destructive or need a body we cannot synthesise generically.
-SKIP_AUTHED_CALL = {"/auth/orgs", "/auth/switch/{org_id}", "/auth/session"}
+SKIP_AUTHED_CALL = {
+    "/auth/orgs", "/auth/switch/{org_id}", "/auth/session",
+    # R29: deletes the caller's own org outright, with no ghost-id escape hatch (unlike
+    # DELETE /jobs/{id} etc, which point at a non-existent id and 404 harmlessly). A real call
+    # here would delete the shared `seeded` org this whole parametrized sweep depends on.
+    # Exercised for real in tests/integration/test_org_gdpr.py instead.
+    "/api/v1/org/",
+}
 
 BODIES = {
     ("POST", "/api/v1/jobs"): lambda s: {"workspace_id": s["workspace_id"], "name": f"n{uuid.uuid4().hex[:6]}", "schedule_expr": "*/5 * * * *", "grace_s": 60},

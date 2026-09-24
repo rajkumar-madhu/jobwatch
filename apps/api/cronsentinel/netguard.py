@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import ipaddress
 import socket
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import httpcore
 import httpx
@@ -102,6 +102,50 @@ def check_url(url: str, *, resolve: bool = True) -> None:
         addrs = _resolve(u.hostname, u.port or (443 if u.scheme == "https" else 80))
         if not any(_allowed(ipaddress.ip_address(a)) for a in addrs):
             raise BlockedDestination("URL resolves only to private, loopback or link-local addresses")
+
+
+def check_nats_url(url: str) -> None:
+    """R30: the tenant's own NATS server. Same policy as check_url (no private/loopback/link-local
+    targets unless OUTBOUND_ALLOW_PRIVATE), adapted for the nats/tls scheme and NATS's default port
+    4222 instead of 80/443. Configuration-time only — the actual connect goes through
+    resolve_nats_host() below for the DNS-rebinding-safe step, the same split check_url/client() use."""
+    u = urlparse(url)
+    if u.scheme not in ("nats", "tls"):
+        raise BlockedDestination("NATS URL must use the nats or tls scheme")
+    if not u.hostname:
+        raise BlockedDestination("URL has no host")
+    try:
+        literal = ipaddress.ip_address(u.hostname)
+    except ValueError:
+        literal = None
+    if literal is not None:
+        if not _allowed(literal):
+            raise BlockedDestination("URL points at a private, loopback or link-local address")
+        return
+    if u.hostname.lower() in ("localhost", "localhost.localdomain") and not settings.outbound_allow_private:
+        raise BlockedDestination("URL points at localhost")
+    addrs = _resolve(u.hostname, u.port or 4222)
+    if not any(_allowed(ipaddress.ip_address(a)) for a in addrs):
+        raise BlockedDestination("URL resolves only to private, loopback or link-local addresses")
+
+
+def resolve_nats_host(url: str) -> str:
+    """R30: connect-time step for a NATS destination — resolve now, right before connecting, and
+    hand nats.py the validated address instead of the original hostname. Same DNS-rebinding defence
+    as _GuardedBackend gives the HTTP path: validating a hostname and then letting the client re-
+    resolve it at connect time leaves a window where the name can change in between."""
+    u = urlparse(url)
+    port = u.port or 4222
+    addrs = [a for a in _resolve(u.hostname, port) if _allowed(ipaddress.ip_address(a))]
+    if not addrs:
+        raise BlockedDestination(f"{u.hostname} has no permitted address")
+    host = f"[{addrs[0]}]" if ":" in addrs[0] else addrs[0]
+    if u.username is None:
+        userinfo = ""
+    else:
+        user = quote(u.username, safe="%")
+        userinfo = f"{user}@" if u.password is None else f"{user}:{quote(u.password, safe='%')}@"
+    return u._replace(netloc=f"{userinfo}{host}:{port}").geturl()
 
 
 class _GuardedBackend(httpcore.SyncBackend):

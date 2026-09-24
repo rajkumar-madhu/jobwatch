@@ -648,3 +648,405 @@ resolves a batch in two queries off the event loop and releases its DB connectio
 publishing (620 → 1,447 events/s on the test box). Heartbeat auth moved off the loop. First tests
 for `/agent/v1/events`, verified against the old handler too. `INGEST_WORKERS` knob in compose.
 `fullstack.sh` health wait widened to 60 s after the API outlasted 20 s on a loaded box.
+
+## R23 — hourly housekeeping
+
+Scorer split into failure-isolated phases with short transactions (heartbeat wait during a 1.7M-row
+retention delete: 3.6–4.9 s → 0.06 s). Migration 0012: `ensure_month_partition` rescues rows
+stranded in the default partition instead of failing forever; `drop_partition_if_empty()` lets the
+system role reclaim emptied month partitions. Numbers and the trade-off (slower wall time) in
+`docs/LOADTEST.md`. Also re-ran the full chain owed from R22 (6/6).
+
+## R24 — usage metering; definer-function ownership
+
+Migration 0013: `execution_logs(org_id)` index; incremental storage metering via a trigger-fed
+ledger (6.0 s → 0.03 s); `FORCE` RLS on the new tables; DML-only `SECURITY DEFINER` functions
+re-owned by `jobwatch_system`. That last one fixes R11's `purge_org`/`purge_job`/status-page prune,
+which would have silently done nothing on a managed-Postgres (non-superuser) owner. Details in
+`docs/LOADTEST.md` and `docs/SECURITY.md`.
+
+Noted, not fixed: 348 orphaned `execution_logs` rows in the dev DB from test fixtures that delete
+orgs without `purge_org()` — test hygiene, not a product path (the CLI purges first).
+
+## R25 — monitoring gaps: our outage never pages a customer
+
+Migration 0014. After a schedule-generator outage every affected job backfilled up to two days of
+slots and the reconciler marked them all missed — an alert storm for a fault on our side. Two
+mechanisms, both fixed in the reconciler before any missed judgement:
+
+1. **Retro-match.** Executions that arrived while no slot existed were recorded unattached and the
+   backfilled slot then looked empty. `retro_match()` binds them (same 90 s / deadline window as the
+   live path, one execution per slot, nearest start wins).
+2. **`unobserved`.** Whatever is still empty inside a period the platform was not watching becomes
+   `unobserved` — terminal, no synthetic execution, no alert, job state untouched. Never `missed`:
+   nobody was there to see it.
+
+Gap detection: `workers/platform_health.heartbeat()` runs every generator and reconciler pass; a
+break > 3× the interval writes `monitoring_gaps`. The reconciler also treats a *currently silent*
+generator as an open gap, so recovery order does not matter. `GET /api/v1/platform/monitoring-gaps`
+exposes gaps (global) and the tenant's own unobserved count; the overview shows a banner.
+
+Measured on the full stack — 45-minute generator outage, every-minute job, 3 real runs reported
+during the outage: before, 46 missed alerts; after, 3 runs recognised, 41 unobserved, 2 genuine
+misses (slots that came due after recovery with no run).
+
+**Trade-off (R25) closed in R26.** Ingest now heartbeats every 20 s from a lifespan task
+(`ingest_main._heartbeat_loop`; any live replica keeps the shared row fresh, which is the right
+semantics — the customer could still be seen). The gap predicate now only counts the *observing*
+services, ingest and the reconciler (`platform_health.OBSERVING_SERVICES`). A generator-only outage
+is no longer a gap: retro-match recovers the runs that happened, and a slot still empty after that
+is an honest miss. Generator gaps are still recorded for the audit trail; they just do not make
+slots unobserved.
+
+Replayed on the full stack (every-minute job, 3 real runs during a 45-minute outage): generator
+down → 3 recovered, 43 honest misses, 0 unobserved; ingest down → 3 recovered, 43 unobserved,
+0 missed alerts.
+
+Also fixed: `test_wrong_agent_key_is_rejected` flipped the key's last hex char to "0"; one run in
+16 it already was "0" and the "wrong" key was the right key — a 200 that read like an auth hole.
+
+## R28 — CI migrations as a non-superuser owner
+
+Migration 0013 (R24's storage metering) had never actually completed under a non-superuser owner,
+anywhere — sandbox, CI, and default compose all run migrations as a superuser, and Postgres skips
+the "new owner must have CREATE on the schema" check entirely for a superuser session. Its five
+`ALTER FUNCTION ... OWNER TO jobwatch_system` calls would have failed with "permission denied for
+schema public" the first time anyone ran the chain as a real non-superuser owner. Fixed by granting
+`jobwatch_system` `CREATE` on schema `public` for the duration of that one transaction, then revoking
+it — the grant and revoke commit atomically with the rest of the migration, so no other session ever
+observes the standing privilege change. This is an in-place edit to an already-numbered migration,
+which this project otherwise treats as immutable — justified here because the broken path has never
+completed successfully anywhere, so there is no deployed behavior to preserve.
+
+CI (`ci.yml`) now runs a second, separate check: bootstrap a non-superuser `migrator` role on a
+throwaway database and run `alembic upgrade head` as it. This is upgrade-only. The migration's own
+downgrade (handing ownership back from `jobwatch_system` to the migration owner) hits a genuine
+Postgres structural limit under non-superuser: `ALTER FUNCTION ... OWNER TO X` requires the acting
+role to be able to `SET ROLE X`, and Postgres's role membership graph is acyclic, so it will not
+also grant `jobwatch_system -> migrator` membership while `migrator -> jobwatch_system` (needed for
+the upgrade) already exists. A fresh deployment only ever upgrades, so this is scoped intentionally,
+not an oversight — see migration 0013's `downgrade()` comment.
+
+## R29 — self-service organization export and deletion
+
+`GET /api/v1/org/export` (any authenticated role) returns a single JSON document: org profile,
+members (email/name/role — the actual personal data GDPR export is about), workspaces, jobs, alert
+channels/rules and integrations (metadata only — `config_enc` is envelope-encrypted and was never
+returned before this either), api keys and agents (metadata only, never a hash), incidents (capped
+at 500), status pages, subscription, and the last 24 usage periods. Raw execution history/logs are
+excluded on purpose: operational telemetry, not org config or personal data, and unboundedly large
+for an old org — already reachable via the existing paginated endpoints if genuinely needed.
+
+`DELETE /api/v1/org/` (owner role) requires the caller to send the org's own slug back
+(`confirm_slug`, checked server-side) and is refused with 409 while a paid subscription is active —
+cancel billing first via the existing `/billing` flow. Runs `purge_org()` for the handful of
+org-scoped tables with no FK to `organizations` (partitioned execution/log tables, R24's storage
+ledger), then deletes the org row itself; every other org-scoped table cascades (verified: every FK
+to `organizations` is `ON DELETE CASCADE`). No `audit_logs` row for the deletion — `purge_org()`
+empties that table, so a row describing the action would not survive the action; the durable record
+is a structured `log.warning` line instead. Mutation-checked: removing either guard fails exactly
+the two tests that assert it.
+
+Added to the router-smoke test's `SKIP_AUTHED_CALL`: unlike other destructive endpoints (`DELETE
+/jobs/{id}` etc.), this one has no ghost-id escape hatch — a generic authenticated call with a valid
+body would delete the org every other test in that sweep depends on. Exercised for real instead in
+`tests/integration/test_org_gdpr.py`.
+
+Also cleared a genuinely stale `monitoring_gaps` row left in the dev DB from earlier R25/26 manual
+verification — it was silently reclassifying unrelated tests' overdue slots as `unobserved`. Test
+hygiene, not a product bug; same class as the previously-noted orphaned `execution_logs` rows.
+
+## R30 — the nats outbound destination kind, implemented
+
+`outbound/deliver.py` had `raise RuntimeError("nats destination not implemented")` since R4 — every
+tenant with a nats destination had every delivery fail, retry to exhaustion (MAX_ATTEMPTS), and
+auto-disable. Two blockers, both fixed:
+
+1. **The save path itself couldn't accept a nats:// URL.** `DestinationIn.url` was pydantic's
+   `HttpUrl`, which rejects any non-http(s) scheme before the handler even runs. Now a plain `str`,
+   validated by kind: `netguard.check_url` (http/https) for webhook, a new `netguard.check_nats_url`
+   (nats/tls, default port 4222, same private/loopback/link-local/CGNAT policy) for nats.
+2. **Delivery itself.** `_publish_nats` opens one short-lived `nats.py` connection per delivery
+   (same shape as `_post_webhook`'s one POST per delivery — no persistent async client to keep
+   alive alongside the sync Celery worker pool), resolves and validates the host at connect time
+   via `netguard.resolve_nats_host` (the DNS-rebinding-safe step `_GuardedBackend` already does for
+   HTTP), publishes to `{subject_prefix}.{event_type}` with a `Nats-Msg-Id` header carrying the
+   signal id, and flushes to confirm the server accepted it. Wrapped in `asyncio.run()` — safe
+   inside a real Celery worker (which has no event loop of its own); the test that exercises the
+   real code path runs the Celery task on `asyncio.to_thread` for exactly that reason.
+
+Config shape: `{url, subject_prefix, token}` — `token` is optional NATS token auth only; user/
+password and NKey/JWT auth are not supported yet (documented gap, not silently partial — the
+webhook path is similarly single-mechanism, HMAC-secret only).
+
+Verified against the sandbox's own NATS instance end-to-end: create a destination, subscribe as a
+real client, trigger delivery through the actual Celery task, assert the message arrives with the
+right subject and header. Mutation-checked: reverting to the old stub fails exactly that test.
+
+`test_destination` (the "send test" button) now supports nats too, with an honest caveat: NATS core
+pub/sub has no delivery acknowledgement beyond the server accepting the publish — `ok: true` means
+reachable and accepted, not that a subscriber received it, same limit noted in the response.
+
+## R31 — multi-replica ingest heartbeat, actually tested
+
+R26 gave ingest its own heartbeat and claimed "with several replicas the row is shared — any live
+replica keeps it fresh" — reasoned at the time, never tested, since the fullstack stack has only
+ever run one ingest process. `tests/fullstack/test_ingest_multi_replica.py` spins up a second real
+ingest process (its own uvicorn, its own port) alongside the fullstack-managed one and proves it:
+
+- Both replicas write the same shared `platform_heartbeats` row (by service name, not per-instance
+  — that's the design; the reconciler asks "was ANY ingest process watching", not "was this one").
+- Kill the extra replica, wait past one heartbeat interval: the row stays fresh purely from the
+  surviving fullstack-managed replica, and a slot whose deadline falls in that window is still
+  correctly judged `missed`, not `unobserved` — one dead replica never blinds the platform.
+
+Mutation-checked properly (the first attempt gave a false pass from a stale pre-mutation row still
+under threshold by coincidence — cleared `platform_heartbeats` before re-running): swapping the
+heartbeat key to one row per process (`ingest-{pid}` instead of the shared `ingest`) makes the test
+fail, confirming it actually exercises the sharing behavior rather than passing regardless.
+
+The reverse case — every ingest replica silent — was verified manually against this same stack:
+two independent replicas, kill both, wait past the 60 s gap threshold (`GAP_MULTIPLIER` × 
+`INGEST_HEARTBEAT_S`). A slot whose deadline fell in that window came back `unobserved`, exactly as
+designed. Not automated: it would require killing the fullstack stack's only ingest process,
+taking down infrastructure every other fullstack test in a shared run depends on. The automated
+test covers the resilience direction (the one that matters for uptime); the manual run is the
+evidence for the blindness direction (the one that matters for alert correctness), recorded here
+rather than encoded as a destructive CI step.
+
+This closes the last item from the earlier open-items list: CI-as-non-superuser (R28), self-service
+org export/deletion (R29), the nats outbound destination (R30), and multi-replica ingest heartbeat
+semantics (R31) are all now implemented, tested, and verified against real infrastructure — not
+just described.
+
+## R32 — typed request bodies on the frontend
+
+Since R15 the generated `lib/api-types.ts` has carried `requestBody` for every POST/PUT/PATCH, but
+nothing consumed it: all 29 mutation call sites were `api(path, { body: JSON.stringify({...}) })`,
+so a misspelled or missing field was a runtime 422 the user saw, never a compile error.
+
+`mutate(path, method, { path, query, body })` in `lib/api.ts` infers the body, path params, query
+params and success response from `paths`. All 29 sites migrated; zero raw mutation calls remain.
+Type-level mutation check: a misspelled body field, a missing required field, a wrong path-param
+name, a wrong query type and a non-mutation method each fail `tsc` with the specific error.
+
+Two things it found on the way:
+
+- **The generator was lying about request bodies.** `openapi-typescript` v7 defaults
+  `--default-non-nullable` to true, which turns "has a default" into "required" — right for a
+  response (the server always fills it), wrong for a request (the client may omit it). The first
+  migrated call site, the create-job form, "failed" typecheck for omitting `kind` and `tags`,
+  both of which the API defaults. Now generated with the flag off.
+- **Which exposed output models that were lying too.** With the flag off, `OverviewOut.by_status`,
+  `top_slowest_7d` and `top_failing_7d` became optional on the read side — because the response
+  model declared `= {}` / `= []` defaults, which in an *output* model claims the field may be
+  absent. The handler always sets all three. Defaults removed; the spec now says required because
+  it is.
+
+Responses with no `response_model` (the R14/R15 `UNMODELLED` list: schedule preview, agent
+bootstrap/rotate, billing checkout/portal, destination test, copilot ask, `/auth/orgs`) come back
+as `unknown` and are cast at the call site, as before — the cast is now the visible marker of an
+unmodelled endpoint rather than an invisible default.
+
+## R33 — /product feature-tour page
+
+`app/(public)/product/page.tsx`: hero → sticky anchor bar (active section tracked with an
+IntersectionObserver) → eleven capability sections, alternating sides, each with a heading, a
+one-liner, four bullets, a link into the corresponding app page, and a product visual. The visuals
+are rendered in the page from the app's own tokens (window chrome, run strips, slot tables, an SVG
+bar chart) — no images and no third-party host, which the e2e sweep enforces for every page.
+
+Every bullet describes something the platform does today (R25's unobserved slots, R30's NATS
+destinations, R32's typed client, R11/R21 RLS, R16 Copilot egress, R18 SSRF guard). Nothing on the
+page is roadmap. `/welcome` links to it from the header; the FAQ there gained `id="faq"` for the
+hero's "How it works" link.
+
+`tests/e2e/pages.spec.ts` covers it on desktop and Pixel 7: no third-party request, no page error,
+all eleven sections present, anchor navigation lands the section in the viewport, every section's
+call-to-action is an in-app route. Desktop screenshot in `docs/screenshots/product-page.png`.
+
+Caught during review, not by the tests: on mobile the header wrapped mid-label ("Get / started").
+Fixed with `whitespace-nowrap` and hiding the secondary links below `sm`, matching `/welcome`.
+
+## R34 — /welcome rebuilt to match /product
+
+Sticky header, two-column hero with a dashboard mock (KPIs + the live feed), an honest proof strip,
+six feature cards that deep-link into `/product#<section>`, how-it-works with the pipeline visual,
+schedulers split into "discovered by the agent" vs "anything else via one heartbeat call", alerting
+and security columns, pricing, FAQ, closing CTA, and a real footer.
+
+Copy corrections while at it — the old page claimed things the code does not do:
+- "PagerDuty, Opsgenie" as native channels: the API's channel kinds are email, slack, teams,
+  discord, telegram, webhook. Now stated as "through their webhook intake". Same fix in `/product`.
+- "argon2-hashed keys": machine keys have been SHA-256 since R21 (argon2 cost ~181 ms per agent
+  heartbeat). Replaced with what is true: envelope-encrypted secrets, SSRF guard, RLS.
+- The fake counters ("12,842 jobs monitored", "43 incidents prevented today") and the illustrative
+  testimonials are gone. The proof strip states capabilities, not invented numbers.
+
+Pre-existing Pipeline visual: the animated packets overlapped node labels at phone width; hidden
+below `md`, nodes and connectors stay. Screenshot in `docs/screenshots/welcome-page.png`.
+50/50 Playwright.
+
+## R35 — the Linux agent, compiled and run against the real stack; landing copy audited
+
+The Go agent under `agents/linux-agent` had never been compiled (open since R1: no Go toolchain in
+the sandbox, `go.dev` and `proxy.golang.org` off the egress allowlist). Every claim about it on the
+landing pages — exit codes preserved, env var values never collected, `cs-run` alias — was source
+inspection. Route found: the `go-bin` wheel on PyPI carries a full Go toolchain (1.27.1). The agent
+is stdlib-only, so no module proxy is needed.
+
+- `go build`/`go vet` clean on first compile. One test was red: `nameFromCommand` gave `php` for
+  `php /var/www/artisan schedule:run`. Now skips a list of interpreters/wrappers (`php`, `node`,
+  `ruby`, `perl`, `java`, `env`, `nice`, `timeout`, `flock`, `chronic`, `exec`, …) → `artisan`.
+- `CRONSENTINEL_CONFIG` overrides `/etc/cronsentinel/agent.json` so the agent runs unprivileged
+  (tests, a per-user install). The buffer path lives inside the config as before.
+- `tests/fullstack/test_linux_agent_e2e.py` drives the real chain with the real binary: API mints
+  a bootstrap token → `enroll` at ingest (token is one-time: second use → 401) → the `cs-run`
+  symlink from `packaging/install.sh` wraps `sh -c 'echo …; exit 3'` with `DB_PASSWORD=<unique>`
+  in its environment → `run` flushes → the exec-processor writes the execution. Asserts: wrapper
+  exits 3, stdout/stderr pass through, on-disk buffer is `[start, fail]`, `env_var_names ⊆` the
+  default allowlist, the secret value appears in no execution row, no `execution_events` payload
+  and not in the buffer file, and the agent row has `last_seen_at`/version. Builds the binary
+  itself when `go` is on PATH, or uses `AGENT_BIN`; `.github/workflows/fullstack.yml` now runs
+  `setup-go`. Mutation-checked: leaking values (`out = append(out, kv)`) fails on the secret;
+  swallowing the exit code fails `0 == 3`.
+- `agents/k8s-agent` is still uncompiled: `k8s.io` vanity imports are not on the allowlist. Add
+  `k8s.io` and `proxy.golang.org` to egress and it can be built the same way.
+
+Brand review of `/welcome` and `/product` (High/Medium items), resolved by evidence where the code
+backs the claim and by removal where it does not:
+- heartbeat URL `/hb/$TOKEN` → `/ping/$TOKEN` (the route is `/ping/{token}`).
+- `cs-run` stays: it is a real alias (`install.sh` symlink; `main.go` dispatches on `argv[0]`),
+  now exercised by the E2E test above. "Environment variable values are never collected" stays for
+  the same reason.
+- Pricing rebuilt from `plan_limits` and what code enforces: caps and retention (`jobs.py`,
+  `agents.py`), channel kinds (`alerting.py` 402), copilot (`ai`). Removed "AI diagnostics",
+  "Advanced analytics", "SSO", "SAML" (TODO Phase 6, no code). Rejected "higher rate limits" and
+  "SMS alerts" after checking (`ratelimit.py` is not plan-scaled; `_SENDERS` has no sms).
+- "PagerDuty and Opsgenie … through their webhook intake" removed: the signed webhook sends our
+  payload; PagerDuty Events v2 and Opsgenie need their own schemas. Now "anything that accepts JSON".
+- "no card" (contradicted "prices are placeholders"), "Ten minutes to the first alert" (unmeasured
+  → "One curl to the first alert"), `K8s` → `Kubernetes`, "the Monday question" → literal.
+- Playwright guard (`tests/e2e/pages.spec.ts`): both pages must contain `/ping/` and must not
+  mention `/hb/`, PagerDuty, Opsgenie, SAML, SSO, SMS alerts, AI diagnostics, Advanced analytics.
+  It caught the webhook-intake sentence a manual grep had missed. 54/54 (was 50).
+
+Migration `0015`: `plan_limits.features` for `business` was seeded (0001) with `pagerduty, opsgenie,
+sms, sso, analytics` — none deliverable — and `app/(app)/billing/page.tsx` renders the array
+verbatim, so the in-app billing page made the same promise the landing page just stopped making.
+Business now carries the Team feature set; its distinction is 5,000 jobs and 365-day retention.
+`tests/integration/test_channel_kinds_consistent.py` pins router `_KINDS` == notifier `_SENDERS`
+and that no seeded plan advertises a kind outside them (red before 0015, green after). The billing
+page maps feature keys to labels (`ai` → "AI copilot", not "Ai").
+
+Test-running note learned the hard way this round: do not run `tests/integration` while
+`scripts/fullstack.sh` is up. Both consume the same NATS subjects, so the stack's exec-processor
+and reconciler eat events the in-process test workers expect (`test_pipeline_nats`,
+`test_slot_lifecycle` fail with `0 == 1`). Sequential runs: 507 passed / 28 skipped, then 9/9
+fullstack. Also: `pkill -f` patterns that appear in your own shell command line kill your shell.
+
+## R36 — real Keycloak found a real bug: every login would have 401ed
+
+Continuing the Keycloak realm-export work: stood up a real Keycloak 26.1.0 (downloaded from
+GitHub Releases — `go-bin`-style route, since `release-assets.githubusercontent.com` is on the
+egress allowlist even though `k8s.io`/module proxies are not) rather than reviewing the export by
+eye. That caught two real defects before either shipped:
+
+1. **The realm export required PKCE**, but `routers/auth.py` never sends a `code_verifier` —
+   `/auth/login` would have 400'd on the very first request against a real Keycloak. Removed the
+   `pkce.code.challenge.method` attribute (not needed: confidential client, server-held secret).
+2. **`verify_id_token()` had no way to check `at_hash`, and nothing called it with one.** Every
+   OIDC-spec-following IdP puts `at_hash` on an id_token issued alongside an access_token — which
+   is exactly what `/auth/callback`'s authorization_code exchange always produces. Confirmed by
+   pulling a real signed token from the live Keycloak and feeding it to the app's own
+   `verify_id_token()`: it raised `jose.exceptions.JWTClaimsError: No access_token provided to
+   compare against at_hash claim`. **Every real login would have failed in production.** Invisible
+   until now because `test_oidc.py`'s 11 tests, and `test_auth_flow.py`'s fake-IdP fixture, both
+   hand-mint tokens that never include `at_hash` — a stub JWKS/synthetic-JWT test suite, however
+   thorough, can't surface a claim it never occurred to anyone to add.
+
+   Fix: `verify_id_token()` takes an optional `access_token` and only turns on jose's
+   `verify_at_hash` when one is supplied — a token with no `at_hash` claim, or a caller that
+   legitimately has no access_token, behaves exactly as before. `routers/auth.py`'s callback now
+   passes `tok.json()["access_token"]` through at both call sites (happy path and the
+   JWKS-rotation retry). Verified against the real Keycloak: real token + real access_token →
+   accepted; a swapped access_token → rejected with "at_hash claim does not match access_token".
+
+   Then ran the **entire interactive login as a browser would** — not just the verifier in
+   isolation. First attempt was plain HTTP and hit a genuine, correct wall: Keycloak marks its
+   login-flow cookies `Secure; SameSite=None`, so no client (httpx or a real browser) will resend
+   them over `http://` — this is TLS-only by cookie spec, not a bug. Generated a self-signed cert,
+   ran Keycloak with real HTTPS, pointed the API at it (`SSL_CERT_FILE` env — httpx's default
+   client respects it for `verify=True`), and drove the complete round trip: `/auth/login` →
+   real 302 to Keycloak → real login form → real credential POST → real 302 back → `/auth/callback`
+   → session cookie set → `/auth/session` returns the real user's email. This is the first time
+   any part of this OIDC integration has been exercised end to end against an actual IdP.
+
+   New tests: `test_oidc.py` gained four (`_token()`'s helper now accepts `access_token=` and
+   mints a real matching `at_hash` via jose's own `encode(..., access_token=...)`) covering
+   accept/reject/mismatch/no-at_hash-at-all. `test_auth_flow.py`'s `_id_token()` now defaults to
+   embedding `at_hash` for `"at"` (the fake IdP's fixed access_token) — meaning every existing test
+   in that file now exercises the real bug's shape by default — plus two new tests: a genuine
+   mismatch caught through the real `/auth/callback` route (not just the library call), and a
+   token with no `at_hash` at all still working. Mutation-checked: reverting the `access_token=at`
+   wiring in `auth.py` fails exactly the one test built to catch it; nothing else regresses,
+   confirming the leniency-when-omitted design is intentional, not incidental.
+
+Also fixed in `deploy/keycloak/cronsentinel-realm.json`/`import.sh` from the same session: the
+export stays deliberately role-and-group-free (JobWatch's `memberships.role` in Postgres is the
+sole authority — Keycloak only proves identity), confirmed by two full `import.sh` runs against
+the live server (create, then idempotent update, same rotated-then-preserved secret both times).
+
+Backend: 513 passed / 28 skipped (one `test_slot_lifecycle` wall-clock flake reproduced once,
+non-reproducing on immediate rerun — not related to this round); fullstack 9/9.
+
+## R37 — actually rendering the Helm charts found a real deployment-blocking bug
+
+`infra/helm/{cronsentinel,cronsentinel-agent}` had never been rendered — no `helm template`, no
+`helm lint`, ever, against either chart. The real `helm` binary can't be built here: it
+transitively needs `k8s.io/client-go`/`k8s.io/api` (same wall as `agents/k8s-agent`), and
+`helm.sh`/`get.helm.sh` aren't reachable either. Rather than review the YAML by eye, wrote
+`tools/mini-helm` — a from-scratch renderer using `text/template` + `Masterminds/sprig`, which
+actually is Helm's rendering core (plus `include`/`toYaml`/`required`, which mini-helm also
+implements). Getting sprig's own dependency tree to resolve needed four `go mod replace`
+redirects — `dario.cat/mergo`, `golang.org/x/crypto`, `gopkg.in/yaml.v2`, `gopkg.in/yaml.v3`, and
+transitively `gopkg.in/check.v1` — to their real GitHub-hosted mirrors, since none of those vanity
+domains are on the egress allowlist either. Every one of those mirrors is a normal, ordinary
+GitHub Go module, so on a real CI runner with unrestricted internet this all resolves through the
+default `proxy.golang.org` with no special configuration; the `replace` directives and committed
+`go.sum` are what make it work at all in this sandbox.
+
+First run found a real bug: `annotations: {"helm.sh/hook": pre-install,pre-upgrade, ...}` — the
+multi-value hook string was **unquoted** inside a flow-style map. The comma silently ended the
+`"helm.sh/hook"` entry and opened a second, bogus, null-valued `"pre-upgrade"` key. A real
+Kubernetes API server rejects a null annotation value outright (`annotations` is
+`map[string]string`), and even setting that aside, the practical effect was worse: the migration
+Secret and the migrate Job (same bug, both places) would only ever have `helm.sh/hook: pre-install`
+— meaning **the schema-migration Job never ran on `helm upgrade`, only on the very first
+`helm install`.** Every deploy after the first would silently skip `alembic upgrade head`. Fixed
+both occurrences (`templates/secret.yaml`, `templates/workloads.yaml`), the second one split onto
+separate lines so a future multi-value annotation can't reintroduce the exact same mistake by habit.
+
+Also found, same session: `cronsentinel-agent`'s `bootstrapToken` defaulted to `""` with nothing
+enforcing an override — a bare `helm install` would silently deploy an agent that can never
+enroll. Added Helm's own `required()`, scoped correctly to skip when `existingSecret` is used
+instead (verified both branches independently). Checked, and correctly did *not* touch, the main
+chart's other blank-by-default secrets (`SECRET_ENCRYPTION_KEY`, Stripe keys): `cronsentinel/keys.py`
+already raises `RuntimeError("SECRET_ENCRYPTION_KEY is not set")` at import time — the app won't
+even start serving on an empty key, so a chart-level guard there would be redundant. Confirmed
+from the actual source, not assumed.
+
+`mini-helm` also gained a generic check for the whole bug class (any `null` value inside
+`metadata.annotations`/`metadata.labels`), not just the one instance found — mutation-checked:
+reverting either fix (the flow map's quoting, or the `required()` guard) makes the tool fail with
+a specific diagnostic; both charts render clean restored. Committed into the repo at
+`tools/mini-helm/` (see its README) with a `go.sum` verified to build fully offline
+(`GOPROXY=off`) from a warm module cache, and wired into `.github/workflows/ci.yml` as a new
+`helm` job: renders `cronsentinel`, and renders `cronsentinel-agent` twice — once with no
+`bootstrapToken` (must fail, proving the guard actually fires) and once with `--set
+bootstrapToken=...` (must pass) — a green run that never exercised the guard would prove nothing.
+`images` now also depends on `helm` passing.
+
+Not covered by this tool, by design (see its README): no live-cluster schema validation (a
+correctly-quoted but semantically invalid field for a given Kubernetes API version would not be
+caught), no `.Files`/subchart support (neither chart uses either).

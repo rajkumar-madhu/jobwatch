@@ -22,6 +22,7 @@ import structlog
 from sqlalchemy import text
 
 from ..db import system_session
+from .platform_health import heartbeat
 from ..schedule_engine import HORIZON, generation_window, slots_between
 
 log = structlog.get_logger()
@@ -98,6 +99,8 @@ async def main():
         t0 = time.monotonic()
         jobs = slots = batches = 0
         try:
+            with system_session() as s:
+                heartbeat(s, "schedule-generator", INTERVAL_S)   # R25: a break here is a monitoring gap
             while True:
                 with system_session() as s:          # one short transaction per batch
                     nj, ns = run_batch(s)

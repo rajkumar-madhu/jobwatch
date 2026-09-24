@@ -204,11 +204,12 @@ class NamedMetric(BaseModel):
 class OverviewOut(BaseModel):
     total_jobs: int
     # Keyed by job status value — a data-keyed map, not a fixed set of fields.
-    by_status: dict[str, int] = {}
+    by_status: dict[str, int]          # R32: always set by the handler; a default here told the
+                                        # generated client it could be missing
     executions_today: int
     success_rate_today: float | None = None
-    top_slowest_7d: list[NamedMetric] = []
-    top_failing_7d: list[NamedMetric] = []
+    top_slowest_7d: list[NamedMetric]
+    top_failing_7d: list[NamedMetric]
     mttd_min: float | None = None
     mttr_min: float | None = None
 
@@ -354,8 +355,10 @@ class SignalDestinationOut(BaseModel):
     sent_24h: int = 0
     failed_24h: int = 0
     url: str | None = None
-    # Never the secret itself — only whether one is configured.
     has_secret: bool = False
+    subject_prefix: str | None = None   # nats destinations only
+    has_token: bool = False             # nats destinations only
+    # Never the secret itself — only whether one is configured.
 
 
 class SignalDeliveryOut(BaseModel):
@@ -382,3 +385,18 @@ class SignalSchemaOut(BaseModel):
     example: dict
 
     model_config = {"populate_by_name": True}
+
+
+class MonitoringGapOut(BaseModel):
+    """R25: a period when the platform itself was not watching. Slots whose deadline fell inside it
+    are `unobserved`, never `missed`, and never alert."""
+    id: int
+    service: str
+    started_at: datetime
+    ended_at: datetime
+    slots_unobserved: int
+
+
+class MonitoringGapsOut(BaseModel):
+    gaps: list[MonitoringGapOut]
+    unobserved_slots_30d: int   # for this organisation

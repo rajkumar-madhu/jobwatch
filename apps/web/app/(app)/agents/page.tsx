@@ -1,7 +1,7 @@
 "use client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { api } from "@/lib/api";
+import { api, mutate } from "@/lib/api";
 import { ago } from "@/lib/format";
 import { Page, Skeleton, ErrorBox, Empty } from "@/components/ui";
 
@@ -12,9 +12,9 @@ export default function AgentsPage() {
   const q = useQuery({ queryKey: ["agents"], queryFn: () => api<Agent[]>("/api/v1/agents") });
   const [tok, setTok] = useState<{ token: string; install: string } | null>(null);
   const [rot, setRot] = useState<string | null>(null);
-  const mint = useMutation({ mutationFn: () => api<{ token: string; install: string }>("/api/v1/agents/bootstrap-token", { method: "POST", body: JSON.stringify({}) }), onSuccess: setTok });
-  const rotate = useMutation({ mutationFn: (id: string) => api<{ agent_key: string }>(`/api/v1/agents/${id}/rotate`, { method: "POST" }), onSuccess: (d) => { setRot(d.agent_key); qc.invalidateQueries({ queryKey: ["agents"] }); } });
-  const revoke = useMutation({ mutationFn: (id: string) => api(`/api/v1/agents/${id}/revoke`, { method: "POST" }), onSuccess: () => qc.invalidateQueries({ queryKey: ["agents"] }) });
+  const mint = useMutation({ mutationFn: () => mutate("/api/v1/agents/bootstrap-token", "post", { body: {} }) as Promise<{ token: string; install: string }>, onSuccess: setTok });
+  const rotate = useMutation({ mutationFn: (id: string) => mutate("/api/v1/agents/{agent_id}/rotate", "post", { path: { agent_id: id } }) as Promise<{ agent_key: string }>, onSuccess: (d) => { setRot(d.agent_key); qc.invalidateQueries({ queryKey: ["agents"] }); } });
+  const revoke = useMutation({ mutationFn: (id: string) => mutate("/api/v1/agents/{agent_id}/revoke", "post", { path: { agent_id: id } }), onSuccess: () => qc.invalidateQueries({ queryKey: ["agents"] }) });
   const stale = (a: Agent) => a.last_seen_at && Date.now() - new Date(a.last_seen_at).getTime() > 5 * 60e3;
   return (
     <Page title="Servers & agents" actions={<button className="btn btn-primary" onClick={() => mint.mutate()}>Install an agent</button>}>

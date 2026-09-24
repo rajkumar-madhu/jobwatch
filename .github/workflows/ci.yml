@@ -14,8 +14,27 @@ jobs:
         with: {python-version: "3.12"}
       # migrations run as the owner and provision the app role; tests run AS the app role so RLS is real
       - run: cd apps/api && pip install -e ".[dev]" && ruff check .
+      # R28 — provision the real DB (superuser owner) and check the chain is reversible. Unchanged
+      # from before; this catches broken downgrade() SQL, not the privilege-boundary bug below.
       - run: cd apps/api && JOBWATCH_APP_DB_PASSWORD=app alembic upgrade head
       - run: cd apps/api && alembic downgrade base && JOBWATCH_APP_DB_PASSWORD=app alembic upgrade head   # full chain must be reversible
+      # R28 — separately, on a throwaway DB, prove the chain UPGRADES end-to-end as a genuinely
+      # non-superuser owner. Migrations were only ever exercised under a superuser here before, so
+      # a definer-function/FORCE-RLS bug (see migration 0013's docstring) could silently ship. A
+      # non-superuser owner cannot ALTER FUNCTION ... OWNER TO cleanly reverse itself (Postgres's
+      # role graph is acyclic — see 0013's downgrade() comment), so this checks upgrade only: that's
+      # what an actual deployment runs. Same DDL a real DBA does once when provisioning a CI role —
+      # kept out of the migrations themselves so they don't hardcode a CI-specific role name.
+      - run: |
+          psql "postgresql://cronsentinel:cronsentinel@localhost:5432/postgres" -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE DATABASE cronsentinel_nonsuperuser_check;
+          \c cronsentinel_nonsuperuser_check
+          CREATE ROLE migrator LOGIN PASSWORD 'migrator' NOSUPERUSER CREATEROLE;
+          ALTER SCHEMA public OWNER TO migrator;
+          GRANT CONNECT, TEMP, CREATE ON DATABASE cronsentinel_nonsuperuser_check TO migrator;
+          SQL
+      - run: cd apps/api && JOBWATCH_APP_DB_PASSWORD=app alembic upgrade head
+        env: {DATABASE_URL: "postgresql+psycopg://migrator:migrator@localhost:5432/cronsentinel_nonsuperuser_check"}
       - run: cd apps/api && pytest -q
         env:
           DATABASE_URL: "postgresql+psycopg://jobwatch_app:app@localhost:5432/cronsentinel"
@@ -64,8 +83,33 @@ jobs:
         with: {go-version: "1.23"}
       - run: cd agents/linux-agent && go vet ./... && go test ./... && make build
       - run: cd agents/k8s-agent && go mod tidy && go vet ./... && go build ./...
+  helm:
+    # R37: infra/helm/{cronsentinel,cronsentinel-agent} were never actually rendered before this
+    # round — a bad flow-map annotation (`{"helm.sh/hook": pre-install,pre-upgrade, ...}`, comma
+    # unquoted) silently broke the migration hook on every `helm upgrade` after the first install,
+    # invisible to any review that didn't parse the real output. The real `helm` binary can't be
+    # built here — it needs k8s.io/client-go, off this repo's egress allowlist — so
+    # tools/mini-helm reimplements the actual rendering surface (text/template + sprig + Helm's
+    # own include/toYaml/required) these two charts use, and additionally checks every rendered
+    # document for the exact class of bug that shipped (a null value inside annotations/labels,
+    # which is always the result of an unquoted comma/colon splitting one flow-map entry into two).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: {go-version: "1.23"}
+      - run: cd tools/mini-helm && go build -o mini-helm .
+      - run: tools/mini-helm/mini-helm --chart infra/helm/cronsentinel --release ci --namespace ci
+      # cronsentinel-agent requires bootstrapToken; render once with none to prove the guard fires
+      # (must fail) and once with a real value (must pass) — a green run that never actually
+      # exercised the required() guard would be worth nothing.
+      - run: |
+          if tools/mini-helm/mini-helm --chart infra/helm/cronsentinel-agent --release ci --namespace ci; then
+            echo "expected the default (no bootstrapToken) render to fail" && exit 1
+          fi
+      - run: tools/mini-helm/mini-helm --chart infra/helm/cronsentinel-agent --release ci --namespace ci --set bootstrapToken=ci-placeholder
   images:
-    needs: [api, web, agents]
+    needs: [api, web, agents, helm]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:

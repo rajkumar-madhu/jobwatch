@@ -25,11 +25,11 @@ def _keypair(kid="k1"):
     return pem, {"keys": [pub]}
 
 
-def _token(pem, *, kid="k1", alg="RS256", **over):
+def _token(pem, *, kid="k1", alg="RS256", access_token=None, **over):
     now = int(time.time())
     claims = {"iss": ISS, "aud": AUD, "sub": "user-1", "email": "a@b.test", "name": "A",
               "iat": now, "exp": now + 300, "nonce": "n1", **over}
-    return jwt.encode(claims, pem, algorithm=alg, headers={"kid": kid})
+    return jwt.encode(claims, pem, algorithm=alg, headers={"kid": kid}, access_token=access_token)
 
 
 def test_valid_token_passes():
@@ -110,16 +110,42 @@ def test_token_without_sub_is_rejected():
         verify_id_token(_token(pem, sub=""), jwks=jwks, issuer=ISS, audience=AUD, nonce="n1")
 
 
-def test_at_hash_requires_matching_access_token():
-    """Keycloak id_tokens include at_hash; jose rejects them unless access_token is supplied."""
-    import base64
-    import hashlib
-
+def test_token_with_at_hash_is_accepted_when_the_matching_access_token_is_supplied():
     pem, jwks = _keypair()
-    access = "opaque-access-token-value"
-    digest = hashlib.sha256(access.encode("utf-8")).digest()
-    at_hash = base64.urlsafe_b64encode(digest[: len(digest) // 2]).rstrip(b"=").decode("ascii")
-    tok = _token(pem, **{"at_hash": at_hash})
-    with pytest.raises(IdTokenError, match="access_token|at_hash"):
-        verify_id_token(tok, jwks=jwks, issuer=ISS, audience=AUD, nonce="n1")
-    assert verify_id_token(tok, jwks=jwks, issuer=ISS, audience=AUD, nonce="n1", access_token=access)["sub"] == "user-1"
+    tok = _token(pem, access_token="the-real-access-token")
+    claims = verify_id_token(tok, jwks=jwks, issuer=ISS, audience=AUD, nonce="n1", access_token="the-real-access-token")
+    assert claims["sub"] == "user-1" and "at_hash" in claims
+
+
+def test_token_with_at_hash_is_not_checked_when_the_caller_supplies_no_access_token():
+    # The OIDC spec makes at_hash checkable only when the verifier actually holds the matching
+    # access_token; a caller that legitimately doesn't have one (or, before this round, simply
+    # forgot to pass it — routers/auth.py's callback did exactly that) is not treated as an error.
+    # This is why the real fix was wiring access_token through at the call site (routers/auth.py),
+    # not making verify_id_token reject every at_hash-bearing token when the arg is omitted —
+    # doing that would have turned "login always 401s against Keycloak" into "login always 401s
+    # against Keycloak or any other spec-compliant IdP, with no way to opt out."
+    pem, jwks = _keypair()
+    tok = _token(pem, access_token="the-real-access-token")
+    claims = verify_id_token(tok, jwks=jwks, issuer=ISS, audience=AUD, nonce="n1")
+    assert claims["sub"] == "user-1"
+
+
+def test_token_with_mismatched_at_hash_is_rejected():
+    # a swapped/wrong access_token must be caught, not silently accepted because *some* value
+    # was passed — this is what actually justifies checking the claim instead of just tolerating it.
+    pem, jwks = _keypair()
+    tok = _token(pem, access_token="the-real-access-token")
+    with pytest.raises(IdTokenError, match="at_hash"):
+        verify_id_token(tok, jwks=jwks, issuer=ISS, audience=AUD, nonce="n1", access_token="a-different-token")
+
+
+def test_token_without_at_hash_is_unaffected_by_the_access_token_param():
+    # backward compatibility: a token that never had at_hash (e.g. some non-Keycloak IdPs, or
+    # Keycloak's direct-grant flow with no access_token requested) verifies the same whether or
+    # not the caller happens to pass one.
+    pem, jwks = _keypair()
+    tok = _token(pem)  # no access_token -> no at_hash claim at all
+    assert verify_id_token(tok, jwks=jwks, issuer=ISS, audience=AUD, nonce="n1")["sub"] == "user-1"
+    assert verify_id_token(tok, jwks=jwks, issuer=ISS, audience=AUD, nonce="n1",
+                           access_token="irrelevant-since-no-at_hash-claim-exists")["sub"] == "user-1"

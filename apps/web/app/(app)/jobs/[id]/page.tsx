@@ -3,7 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
-import { api, type Job, type Execution } from "@/lib/api";
+import { api, mutate, type Job, type Execution } from "@/lib/api";
+import { ingestOrigin } from "@/lib/urls";
 import { ago, dur, ts, statusLabel } from "@/lib/format";
 import { Page, Status, Strip, Skeleton, ErrorBox, Empty } from "@/components/ui";
 
@@ -72,9 +73,9 @@ export default function JobPage() {
   const impact = useQuery({ queryKey: ["impact", id], queryFn: () => api<{ upstream: any[]; downstream: any[] }>(`/api/v1/jobs/${id}/impact`) });
   const allJobs = useQuery({ queryKey: ["jobs", "all"], queryFn: () => api<{ items: Job[] }>("/api/v1/jobs?limit=200") });
   const [depSel, setDepSel] = useState("");
-  const addDep = useMutation({ mutationFn: () => api("/api/v1/dependencies", { method: "POST", body: JSON.stringify({ job_id: id, depends_on_job_id: depSel }) }), onSuccess: () => { setDepSel(""); qc.invalidateQueries({ queryKey: ["impact", id] }); } });
-  const rmDep = useMutation({ mutationFn: (d: string) => api(`/api/v1/dependencies?job_id=${id}&depends_on_job_id=${d}`, { method: "DELETE" }), onSuccess: () => qc.invalidateQueries({ queryKey: ["impact", id] }) });
-  const pause = useMutation({ mutationFn: (paused: boolean) => api(`/api/v1/jobs/${id}`, { method: "PATCH", body: JSON.stringify({ paused }) }), onSuccess: () => qc.invalidateQueries({ queryKey: ["job", id] }) });
+  const addDep = useMutation({ mutationFn: () => mutate("/api/v1/dependencies", "post", { body: { job_id: id, depends_on_job_id: depSel } }), onSuccess: () => { setDepSel(""); qc.invalidateQueries({ queryKey: ["impact", id] }); } });
+  const rmDep = useMutation({ mutationFn: (d: string) => mutate("/api/v1/dependencies", "delete", { query: { job_id: id, depends_on_job_id: d } }), onSuccess: () => qc.invalidateQueries({ queryKey: ["impact", id] }) });
+  const pause = useMutation({ mutationFn: (paused: boolean) => mutate("/api/v1/jobs/{job_id}", "patch", { path: { job_id: id }, body: { paused } }), onSuccess: () => qc.invalidateQueries({ queryKey: ["job", id] }) });
   if (job.error) return <Page title="Job"><ErrorBox error={job.error} /></Page>;
   if (!job.data) return <Page title="Job"><Skeleton /></Page>;
   const j = job.data; const list = execs.data ?? []; const selected = sel ?? list[0]?.id;
@@ -94,7 +95,7 @@ export default function JobPage() {
 
       <div className="mb-5">
         <div className="mb-1 flex items-baseline justify-between text-xs text-mute"><span>Run history — bar height = duration, click to inspect</span><span>older → newer</span></div>
-        {execs.isLoading ? <div className="skeleton h-6" /> : list.length === 0 ? <Empty title="No runs recorded yet" hint={`Ping this job: curl ${process.env.NEXT_PUBLIC_API_URL?.replace("8000", "8010")}/ping/${j.heartbeat_token}`} />
+        {execs.isLoading ? <div className="skeleton h-6" /> : list.length === 0 ? <Empty title="No runs recorded yet" hint={`Ping this job: curl ${ingestOrigin()}/ping/${j.heartbeat_token}`} />
           : <div className="rounded-md border border-line px-3 py-2"><Strip execs={list} onPick={setSel} /></div>}
       </div>
 
@@ -124,10 +125,10 @@ export default function JobPage() {
       </section>
       <details className="mt-6 text-sm"><summary className="cursor-pointer text-mute">Integration snippets</summary>
         <pre className="mt-2 overflow-auto rounded-md border border-line bg-panel p-3 font-mono text-xs">{`# simple
-curl -fsS ${process.env.NEXT_PUBLIC_API_URL?.replace("8000", "8010")}/ping/${j.heartbeat_token}
+curl -fsS ${ingestOrigin()}/ping/${j.heartbeat_token}
 
 # start/finish with exit code (bash)
-H=${process.env.NEXT_PUBLIC_API_URL?.replace("8000", "8010")}/heartbeat/${j.heartbeat_token}
+H=${ingestOrigin()}/heartbeat/${j.heartbeat_token}
 curl -fsS $H/start; ./your-job.sh && curl -fsS $H/success || curl -fsS $H/fail
 
 # agent wrapper (captures logs, duration, exit code)

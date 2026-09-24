@@ -70,3 +70,41 @@ test("landing page renders", async ({ page }) => {
   await page.goto("/welcome");
   await expect(page.locator("body")).toContainText(/JobWatch/i);
 });
+
+// R35 brand review: the public pages only promise what the code delivers. The heartbeat route is
+// /ping/{token} (apps/api/routers/heartbeat.py), and pagerduty/opsgenie/sms/sso/saml are TODOs
+// with no sender or provider behind them — none of them may appear as an offer.
+for (const path of ["/welcome", "/product"]) {
+  test(`${path} makes no claims the code does not back`, async ({ page }) => {
+    await page.goto(path);
+    const body = await page.locator("body").innerText();
+    expect(body).toContain("/ping/");
+    expect(body).not.toMatch(/\/hb\//);
+    expect(body).not.toMatch(/PagerDuty|Opsgenie|\bSAML\b|\bSSO\b|SMS alerts|AI diagnostics|Advanced analytics/);
+  });
+}
+
+// R33: /product — the feature tour. Same rules as every app page: no third-party host, no console
+// error, every section reachable from the sticky anchor bar, every "Learn more" points into the app.
+test("product page renders with no third-party requests and working anchors", async ({ page }) => {
+  const thirdParty: string[] = [];
+  page.on("request", (r) => { const h = new URL(r.url()).host; if (!/^localhost:(3000|8000)$/.test(h)) thirdParty.push(r.url()); });
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.goto("/product");
+  await expect(page.getByRole("heading", { level: 1 })).toContainText(/every scheduled job/i);
+  const nav = page.getByRole("navigation", { name: "Product sections" });
+  const links = nav.getByRole("link");
+  expect(await links.count()).toBe(11);
+  for (const id of ["agents", "schedule", "alerting", "incidents", "logs", "analytics", "signals", "status", "copilot", "api", "security"]) {
+    await expect(page.locator(`section#${id} h2`)).toBeVisible();
+  }
+  await nav.getByRole("link", { name: "Security" }).click();
+  await expect(page).toHaveURL(/#security$/);
+  await expect(page.locator("section#security")).toBeInViewport();
+  // every section's call-to-action goes somewhere in the app, not to a dead anchor
+  const ctas = await page.locator("section a[href^='/']").evaluateAll((as) => as.map((a) => (a as HTMLAnchorElement).getAttribute("href")));
+  expect(ctas.length).toBeGreaterThanOrEqual(11);
+  expect(thirdParty).toEqual([]);
+  expect(errors).toEqual([]);
+});

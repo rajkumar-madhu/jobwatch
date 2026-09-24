@@ -128,6 +128,8 @@ def callback(code: str | None = None, state: str | None = None, error: str | Non
     if not id_token:
         raise HTTPException(401, "token response missing id_token")
     disc = _discovery()
+    # Pass the same response's access_token so verify_id_token can check at_hash. Keycloak puts
+    # at_hash on every id_token issued alongside an access_token.
     try:
         claims = verify_id_token(id_token, jwks=fetch_jwks(disc["jwks_uri"]),
                                  issuer=disc["issuer"], audience=settings.keycloak_client_id,

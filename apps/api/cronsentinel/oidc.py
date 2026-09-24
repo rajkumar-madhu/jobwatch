@@ -47,10 +47,15 @@ def _key_for(jwks: dict, kid: str | None) -> dict:
 
 
 def verify_id_token(token: str, *, jwks: dict, issuer: str, audience: str, nonce: str | None = None,
-                    access_token: str | None = None, now: float | None = None) -> dict:
+                    now: float | None = None, access_token: str | None = None) -> dict:
     """Return the verified claims, or raise IdTokenError. Checks, in order:
-    alg allow-list, signature, iss, aud (incl. azp for multi-audience tokens), exp/iat, nonce.
-    When the id_token carries at_hash (Keycloak does), pass access_token so jose can verify it."""
+    alg allow-list, signature, iss, aud (incl. azp for multi-audience tokens), exp/iat, at_hash, nonce.
+
+    access_token: every id_token issued alongside an access_token carries at_hash. python-jose
+    raises if it sees at_hash and no access_token was passed, which rejected every real Keycloak
+    login. Pass the same-response access_token so jose checks at_hash. When the caller has no
+    access_token, at_hash is not checked — the claim is only meaningful against a token we hold.
+    """
     try:
         header = jwt.get_unverified_header(token)
     except JWTError as e:
@@ -64,7 +69,8 @@ def verify_id_token(token: str, *, jwks: dict, issuer: str, audience: str, nonce
             token, key, algorithms=list(ALLOWED_ALGS), issuer=issuer, audience=audience,
             access_token=access_token,
             options={"verify_aud": True, "verify_iss": True, "verify_exp": True,
-                     "verify_signature": True, "leeway": LEEWAY_S},
+                     "verify_signature": True, "leeway": LEEWAY_S,
+                     "verify_at_hash": access_token is not None},
         )
     except JWTError as e:
         raise IdTokenError(f"id_token rejected: {e}") from e
