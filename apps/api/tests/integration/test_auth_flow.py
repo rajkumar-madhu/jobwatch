@@ -110,6 +110,13 @@ def test_login_issues_state_and_nonce(client):
     assert state and nonce and state != nonce
 
 
+def test_login_sends_pkce_s256(client):
+    r = client.get("/auth/login", params={"next": "/jobs"})
+    q = parse_qs(urlparse(r.headers["location"]).query)
+    assert q["code_challenge_method"] == ["S256"]
+    assert q["code_challenge"][0] and len(q["code_challenge"][0]) >= 43
+
+
 def test_callback_verifies_token_and_sets_session(client):
     from cronsentinel.db import system_session
     state, nonce = _login(client)
@@ -186,3 +193,25 @@ def test_callback_still_accepts_an_id_token_with_no_at_hash_at_all(client):
     from cronsentinel.db import system_session
     with system_session() as s:
         s.execute(text("DELETE FROM users WHERE email='u@example.test'"))
+
+
+def test_callback_without_code_redirects_to_login(client, monkeypatch):
+    """Bare /auth/callback (refresh or bookmark) must not 422 — send the user back to login."""
+    from cronsentinel.config import settings
+    monkeypatch.setattr(settings, "web_public_url", "https://app.test", raising=False)
+    r = client.get("/auth/callback")
+    assert r.status_code in (302, 307), r.text
+    loc = r.headers["location"]
+    assert loc.startswith("https://app.test/login?")
+    assert "error=sign_in_incomplete" in loc
+
+
+def test_callback_idp_error_redirects_to_login(client, monkeypatch):
+    from cronsentinel.config import settings
+    monkeypatch.setattr(settings, "web_public_url", "https://app.test", raising=False)
+    state, _ = _login(client)
+    r = client.get("/auth/callback", params={"error": "access_denied", "state": state})
+    assert r.status_code in (302, 307), r.text
+    loc = r.headers["location"]
+    assert loc.startswith("https://app.test/login?")
+    assert "error=sign_in_cancelled" in loc

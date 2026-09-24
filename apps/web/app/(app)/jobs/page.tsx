@@ -15,7 +15,7 @@ function JobRow({ j }: { j: Job }) {
     <Link href={`/jobs/${j.id}`} className="row grid-cols-[minmax(0,2fr)_110px_minmax(0,1.5fr)_110px_60px]">
       <div className="min-w-0">
         <div className="truncate font-medium">{j.name}</div>
-        <div className="truncate text-xs text-mute">{j.schedule_human ?? "Heartbeat only"}{j.tags.length > 0 && ` · ${j.tags.join(", ")}`}</div>
+        <div className="truncate text-xs text-mute">{j.schedule_human ?? "Heartbeat only"}{(j.tags?.length ?? 0) > 0 && ` · ${(j.tags ?? []).join(", ")}`}</div>
       </div>
       <Status s={j.status} />
       <div>{ex.data ? <Strip execs={ex.data} /> : <div className="skeleton h-5" />}</div>
@@ -55,14 +55,19 @@ function NewJob({ onDone }: { onDone: () => void }) {
 
 function JobsInner() {
   const params = useSearchParams();
-  const [filter, setFilter] = useState("all");
+  const statusParam = params.get("status");
+  const initialFilter = statusParam && FILTERS.includes(statusParam) ? statusParam : "all";
+  const [filter, setFilter] = useState(initialFilter);
   const [creating, setCreating] = useState(params.get("new") === "1");
   const q = useQuery({ queryKey: ["jobs", filter], queryFn: () => api<{ items: Job[] }>(`/api/v1/jobs?limit=200${filter !== "all" ? `&status=${filter}` : ""}`) });
   return (
     <Page title="Jobs" actions={<button className="btn btn-primary" onClick={() => setCreating(true)}>Add job</button>}>
       {creating && <NewJob onDone={() => setCreating(false)} />}
-      <div className="mb-3 flex gap-1">{FILTERS.map((f) => (
-        <button key={f} onClick={() => setFilter(f)} className={`rounded-md px-2.5 py-1 text-sm capitalize ${filter === f ? "bg-ink/10 font-medium" : "text-mute hover:text-ink"}`}>{f}</button>))}</div>
+      <div className="mb-3 flex flex-wrap gap-1" role="toolbar" aria-label="Filter jobs by status">
+        {FILTERS.map((f) => (
+          <button key={f} type="button" aria-pressed={filter === f} onClick={() => setFilter(f)} className={`rounded-md px-2.5 py-1 text-sm capitalize ${filter === f ? "bg-ink/10 font-medium" : "text-mute hover:text-ink"}`}>{f}</button>
+        ))}
+      </div>
       {q.error ? <ErrorBox error={q.error} /> : q.isLoading ? <Skeleton /> : q.data!.items.length === 0
         ? <Empty title={filter === "all" ? "No jobs yet" : `No ${filter} jobs`} hint={filter === "all" ? "Add a job manually, or install the agent and it will discover your crontabs." : "Try another filter."} action={filter === "all" && <button className="btn btn-primary" onClick={() => setCreating(true)}>Add job</button>} />
         : <div className="tbl rounded-lg border border-line">

@@ -9,10 +9,14 @@ spec:
   template:
     metadata: {labels: {app: {{ include "cs.fullname" .root }}-{{ .name }}}}
     spec:
-      securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
+      securityContext: {runAsNonRoot: true, runAsUser: {{ .runAsUser | default 10001 }}, seccompProfile: {type: RuntimeDefault}}
+      {{- with .root.Values.imagePullSecrets }}
+      imagePullSecrets: {{ toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: {{ .name }}
           image: {{ .image }}
+          imagePullPolicy: {{ .root.Values.imagePullPolicy }}
           {{- if .command }}
           command: {{ toJson .command }}
           {{- end }}

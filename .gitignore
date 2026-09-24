@@ -1,6 +1,7 @@
 # deps / build
 node_modules/
 .next/
+infra/docker/web-linux-modules/
 dist/
 *.egg-info/
 __pycache__/

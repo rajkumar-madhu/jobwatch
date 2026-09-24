@@ -2,7 +2,7 @@
 {{- range $w := list
   (dict "name" "api" "image" $.Values.image.api "command" (list "uvicorn" "cronsentinel.main:app" "--host" "0.0.0.0" "--port" "8000") "port" 8000 "replicas" $.Values.replicas.api "resources" $.Values.resources.api)
   (dict "name" "ingest" "image" $.Values.image.api "command" (list "uvicorn" "cronsentinel.ingest_main:app" "--host" "0.0.0.0" "--port" "8010") "port" 8010 "replicas" $.Values.replicas.ingest "resources" $.Values.resources.api)
-  (dict "name" "web" "image" $.Values.image.web "port" 3000 "replicas" $.Values.replicas.web "resources" $.Values.resources.api)
+  (dict "name" "web" "image" $.Values.image.web "port" 3000 "replicas" $.Values.replicas.web "resources" $.Values.resources.api "runAsUser" 1000)
   (dict "name" "exec-processor" "image" $.Values.image.api "command" (list "python" "-m" "cronsentinel.workers.exec_processor") "replicas" $.Values.replicas.execProcessor "resources" $.Values.resources.worker)
   (dict "name" "reconciler" "image" $.Values.image.api "command" (list "python" "-m" "cronsentinel.workers.reconciler") "replicas" $.Values.replicas.reconciler "resources" $.Values.resources.worker)
   (dict "name" "schedule-generator" "image" $.Values.image.api "command" (list "python" "-m" "cronsentinel.workers.schedule_generator") "replicas" $.Values.replicas.scheduleGenerator "resources" $.Values.resources.worker)
@@ -30,11 +30,16 @@ spec:
   template:
     spec:
       restartPolicy: Never
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{ toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: migrate
           image: {{ .Values.image.api }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
           command: ["alembic", "upgrade", "head"]
-          envFrom: [{secretRef: {name: {{ include "cs.fullname" . }}-env}}]
-          env:   # overrides: migrations run as the owner and provision the app role's password
+          # Only the migration Secret (hook-weight -5). The main env Secret is not a hook and is
+          # created after pre-install, so referencing it here left the migrate Job Pending forever.
+          env:
             - {name: DATABASE_URL, valueFrom: {secretKeyRef: {name: {{ include "cs.fullname" . }}-migration, key: DATABASE_URL}}}
             - {name: JOBWATCH_APP_DB_PASSWORD, valueFrom: {secretKeyRef: {name: {{ include "cs.fullname" . }}-migration, key: JOBWATCH_APP_DB_PASSWORD}}}

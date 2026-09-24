@@ -1,5 +1,8 @@
 """Keycloak OIDC authorization-code flow → httpOnly session cookie (D1).
-Session = signed JWT {sub, email, name, org_id?} using SECRET_ENCRYPTION_KEY. CSRF: SameSite=Lax + state param."""
+Session = signed JWT {sub, email, name, org_id?} using SECRET_ENCRYPTION_KEY. CSRF: SameSite=Lax + state param.
+PKCE (S256) is required — Keycloak public clients reject authorize requests without code_challenge_method."""
+import base64
+import hashlib
 import json
 import secrets
 import time
@@ -29,8 +32,21 @@ _oidc: dict = {}
 
 def _discovery():
     if not _oidc:
-        _oidc.update(httpx.get(f"{settings.keycloak_issuer}/.well-known/openid-configuration", timeout=5).json())
+        try:
+            r = httpx.get(f"{settings.keycloak_issuer}/.well-known/openid-configuration", timeout=5)
+            r.raise_for_status()
+            _oidc.update(r.json())
+        except Exception as e:
+            raise HTTPException(503, f"identity provider unavailable: {e}") from e
     return _oidc
+
+
+def _pkce_pair() -> tuple[str, str]:
+    """RFC 7636 S256: verifier is sent on token exchange; challenge goes on the authorize URL."""
+    verifier = secrets.token_urlsafe(64)
+    digest = hashlib.sha256(verifier.encode("ascii")).digest()
+    challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+    return verifier, challenge
 
 
 def sign_session(claims: dict) -> str:
@@ -49,44 +65,81 @@ def _set_cookie(resp: Response, tok: str):
 
 
 @router.get("/login")
-def login(next: str = "/"):
+def login(next: str = "/", login_hint: str | None = None):
     state = secrets.token_urlsafe(24)
     nonce = secrets.token_urlsafe(24)
-    # state and nonce are stored together: state binds the redirect, nonce binds the id_token to
-    # this login attempt so a replayed code cannot mint a session.
-    _r.setex(f"oauth:{state}", 600, json.dumps({"next": next, "nonce": nonce}))
-    q = urlencode({"client_id": settings.keycloak_client_id, "response_type": "code", "scope": "openid email profile",
-                   "redirect_uri": f"{settings.api_public_url}/auth/callback", "state": state, "nonce": nonce})
+    verifier, challenge = _pkce_pair()
+    # state binds the redirect; nonce binds the id_token; verifier completes PKCE on token exchange.
+    _r.setex(f"oauth:{state}", 600, json.dumps({"next": next, "nonce": nonce, "code_verifier": verifier}))
+    params: dict[str, str] = {
+        "client_id": settings.keycloak_client_id,
+        "response_type": "code",
+        "scope": "openid email profile",
+        "redirect_uri": f"{settings.api_public_url}/auth/callback",
+        "state": state,
+        "nonce": nonce,
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+    }
+    # OIDC login_hint pre-fills the IdP email field when the user typed it on our form.
+    if login_hint and "@" in login_hint:
+        params["login_hint"] = login_hint.strip()[:254]
+    q = urlencode(params)
     return RedirectResponse(f"{_discovery()['authorization_endpoint']}?{q}")
 
 
+def _login_error_redirect(reason: str, state: str | None = None) -> RedirectResponse:
+    """Send the browser back to the SPA login page instead of a FastAPI JSON 422."""
+    if state:
+        _r.delete(f"oauth:{state}")
+    # Keep the message short and safe — never echo raw IdP HTML/descriptions.
+    q = urlencode({"error": reason})
+    return RedirectResponse(f"{settings.web_public_url}/login?{q}")
+
+
 @router.get("/callback")
-def callback(code: str, state: str):
+def callback(code: str | None = None, state: str | None = None, error: str | None = None, error_description: str | None = None):
+    # Keycloak cancel / misconfig / bare refresh land here without `code`.
+    if error:
+        msg = {"access_denied": "sign_in_cancelled", "login_required": "sign_in_required"}.get(error, "sign_in_failed")
+        return _login_error_redirect(msg, state)
+    if not code or not state:
+        return _login_error_redirect("sign_in_incomplete", state)
     saved = _r.get(f"oauth:{state}")
     if not saved: raise HTTPException(400, "invalid state")
     _r.delete(f"oauth:{state}")   # single use: a replayed callback fails the state lookup
     try:
         parsed = json.loads(saved)
         nxt, nonce = parsed["next"], parsed["nonce"]
+        code_verifier = parsed.get("code_verifier")
     except (ValueError, KeyError, TypeError):
-        nxt, nonce = saved, None   # tolerate sessions started before the nonce change
-    tok = httpx.post(_discovery()["token_endpoint"], data={"grant_type": "authorization_code", "code": code, "redirect_uri": f"{settings.api_public_url}/auth/callback",
-                                                            "client_id": settings.keycloak_client_id, "client_secret": settings.keycloak_client_secret}, timeout=10)
+        nxt, nonce, code_verifier = saved, None, None   # tolerate sessions started before the nonce change
+    token_data = {"grant_type": "authorization_code", "code": code, "redirect_uri": f"{settings.api_public_url}/auth/callback",
+                  "client_id": settings.keycloak_client_id}
+    if code_verifier:
+        token_data["code_verifier"] = code_verifier
+    if settings.keycloak_client_secret:
+        token_data["client_secret"] = settings.keycloak_client_secret
+    tok = httpx.post(_discovery()["token_endpoint"], data=token_data, timeout=10)
     if tok.status_code != 200: raise HTTPException(401, "token exchange failed")
+    payload = tok.json()
+    id_token = payload.get("id_token")
+    access_token = payload.get("access_token")
+    if not id_token:
+        raise HTTPException(401, "token response missing id_token")
     disc = _discovery()
-    # R35: the same response's access_token, so verify_id_token can check at_hash — Keycloak (and
-    # any spec-following IdP) puts at_hash on every id_token issued alongside an access_token,
-    # which every authorization_code exchange is. Found by testing against a real Keycloak: without
-    # this, every real login rejected with "No access_token provided to compare against at_hash".
-    at = tok.json().get("access_token")
+    # Pass the same response's access_token so verify_id_token can check at_hash. Keycloak puts
+    # at_hash on every id_token issued alongside an access_token.
     try:
-        claims = verify_id_token(tok.json()["id_token"], jwks=fetch_jwks(disc["jwks_uri"]),
-                                 issuer=disc["issuer"], audience=settings.keycloak_client_id, nonce=nonce, access_token=at)
+        claims = verify_id_token(id_token, jwks=fetch_jwks(disc["jwks_uri"]),
+                                 issuer=disc["issuer"], audience=settings.keycloak_client_id,
+                                 nonce=nonce, access_token=access_token)
     except IdTokenError:
         # a rotated signing key looks exactly like a bad signature: refetch once before rejecting
         try:
-            claims = verify_id_token(tok.json()["id_token"], jwks=fetch_jwks(disc["jwks_uri"], force=True),
-                                     issuer=disc["issuer"], audience=settings.keycloak_client_id, nonce=nonce, access_token=at)
+            claims = verify_id_token(id_token, jwks=fetch_jwks(disc["jwks_uri"], force=True),
+                                     issuer=disc["issuer"], audience=settings.keycloak_client_id,
+                                     nonce=nonce, access_token=access_token)
         except IdTokenError as e:
             raise HTTPException(401, f"invalid id_token: {e}") from e
     email = claims.get("email")

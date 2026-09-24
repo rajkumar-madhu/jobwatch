@@ -1,0 +1,73 @@
+# Postgres and Redis for the JobWatch demo on the WeCrew cluster.
+# Create the password secret before applying:
+#   kubectl -n jobwatch create secret generic jobwatch-data \
+#     --from-literal=POSTGRES_USER=cronsentinel \
+#     --from-literal=POSTGRES_PASSWORD=... \
+#     --from-literal=POSTGRES_DB=cronsentinel \
+#     --from-literal=APP_DB_PASSWORD=...
+apiVersion: v1
+kind: Service
+metadata: {name: jobwatch-postgres, namespace: jobwatch}
+spec:
+  selector: {app: jobwatch-postgres}
+  ports: [{port: 5432, targetPort: 5432}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: jobwatch-postgres, namespace: jobwatch}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: jobwatch-postgres}}
+  template:
+    metadata: {labels: {app: jobwatch-postgres}}
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: POSTGRES_USER, valueFrom: {secretKeyRef: {name: jobwatch-data, key: POSTGRES_USER}}}
+            - {name: POSTGRES_PASSWORD, valueFrom: {secretKeyRef: {name: jobwatch-data, key: POSTGRES_PASSWORD}}}
+            - {name: POSTGRES_DB, valueFrom: {secretKeyRef: {name: jobwatch-data, key: POSTGRES_DB}}}
+          ports: [{containerPort: 5432}]
+          readinessProbe: {exec: {command: ["pg_isready", "-U", "cronsentinel"]}, periodSeconds: 5}
+          resources:
+            requests: {cpu: 50m, memory: 256Mi}
+            limits: {cpu: "1", memory: 1Gi}
+          volumeMounts: [{name: data, mountPath: /var/lib/postgresql/data}]
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: jobwatch-postgres}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: jobwatch-postgres, namespace: jobwatch}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: {requests: {storage: 5Gi}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: jobwatch-redis, namespace: jobwatch}
+spec:
+  selector: {app: jobwatch-redis}
+  ports: [{port: 6379, targetPort: 6379}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: jobwatch-redis, namespace: jobwatch}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: jobwatch-redis}}
+  template:
+    metadata: {labels: {app: jobwatch-redis}}
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          imagePullPolicy: IfNotPresent
+          ports: [{containerPort: 6379}]
+          readinessProbe: {tcpSocket: {port: 6379}, periodSeconds: 5}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {cpu: 200m, memory: 128Mi}

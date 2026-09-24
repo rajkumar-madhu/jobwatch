@@ -7,8 +7,8 @@ export const Status = ({ s }: { s: string }) => (
 );
 
 export const Page = ({ title, actions, children }: { title: React.ReactNode; actions?: React.ReactNode; children: React.ReactNode }) => (
-  <div className="mx-auto max-w-[1200px] px-6 py-5">
-    <div className="mb-4 flex items-center justify-between gap-4"><h1 className="text-lg font-semibold tracking-tight">{title}</h1>{actions}</div>
+  <div className="mx-auto max-w-[1200px] px-6 py-6">
+    <div className="mb-5 flex items-center justify-between gap-4"><h1 className="text-2xl font-semibold tracking-tight text-accent">{title}</h1>{actions}</div>
     {children}
   </div>
 );

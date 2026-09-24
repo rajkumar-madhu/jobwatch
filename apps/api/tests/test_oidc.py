@@ -110,11 +110,6 @@ def test_token_without_sub_is_rejected():
         verify_id_token(_token(pem, sub=""), jwks=jwks, issuer=ISS, audience=AUD, nonce="n1")
 
 
-# R35 — found by testing against a REAL Keycloak, not this synthetic suite: every id_token issued
-# alongside an access_token (i.e. every authorization_code exchange — what routers/auth.py's
-# callback always does) carries an `at_hash` claim, per OIDC Core §3.1.3.6. Before this round
-# verify_id_token() had no way to check it and no caller passed one, so jose's decoder raised a
-# raw JWTClaimsError on every real login. These are the tests that should have existed already.
 def test_token_with_at_hash_is_accepted_when_the_matching_access_token_is_supplied():
     pem, jwks = _keypair()
     tok = _token(pem, access_token="the-real-access-token")

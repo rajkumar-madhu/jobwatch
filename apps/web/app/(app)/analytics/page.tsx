@@ -20,7 +20,7 @@ export default function AnalyticsPage() {
   const pts = (series.data?.points ?? []).map((p: any) => ({ ...p, t: fmtT(p.t), rate: p.executions ? Math.min(100, Math.round(100 * p.ok / p.executions)) : null, p95_s: p.p95_ms ? p.p95_ms / 1000 : null }));
   const r = rep.data;
   return (
-    <Page title="Analytics" actions={<div className="flex gap-1">{[7, 14, 30, 90].map((d) => <button key={d} onClick={() => setDays(d)} className={`rounded-md px-2.5 py-1 text-sm ${days === d ? "bg-ink/10 font-medium" : "text-mute"}`}>{d}d</button>)}</div>}>
+    <Page title="Analytics" actions={<div className="flex gap-1" role="toolbar" aria-label="Time range">{[7, 14, 30, 90].map((d) => <button key={d} type="button" aria-pressed={days === d} onClick={() => setDays(d)} className={`rounded-md px-2.5 py-1 text-sm ${days === d ? "bg-ink/10 font-medium" : "text-mute"}`}>{d}d</button>)}</div>}>
       <div className="mb-6 grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">{[["Incidents", mt.data?.incidents], ["MTTD", mt.data?.mttd_min != null ? `${mt.data.mttd_min} min` : "—"], ["MTTA", mt.data?.mtta_min != null ? `${mt.data.mtta_min} min` : "—"], ["MTTR", mt.data?.mttr_min != null ? `${mt.data.mttr_min} min` : "—"]].map(([l, v]) => (
         <div key={l as string}><div className="text-mute">{l}</div><div className="text-xl font-semibold tabular-nums">{v ?? "—"}</div></div>))}</div>
       {series.isLoading ? <Skeleton /> : <div className="grid gap-6 lg:grid-cols-2">
