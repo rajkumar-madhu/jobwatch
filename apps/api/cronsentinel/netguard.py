@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import ipaddress
 import socket
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import httpcore
 import httpx
@@ -142,10 +142,9 @@ def resolve_nats_host(url: str) -> str:
     host = f"[{addrs[0]}]" if ":" in addrs[0] else addrs[0]
     if u.username is None:
         userinfo = ""
-    elif u.password is None:
-        userinfo = f"{u.username}@"
     else:
-        userinfo = f"{u.username}:{u.password}@"
+        user = quote(u.username, safe="%")
+        userinfo = f"{user}@" if u.password is None else f"{user}:{quote(u.password, safe='%')}@"
     return u._replace(netloc=f"{userinfo}{host}:{port}").geturl()
 
 

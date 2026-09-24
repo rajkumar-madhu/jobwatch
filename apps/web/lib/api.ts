@@ -1,4 +1,6 @@
 /** Thin API client. Auth: API key (X-API-Key) from localStorage for now; Keycloak session cookie in Phase 5. */
+import { apiUrl } from "@/lib/urls";
+
 export const API = process.env.NEXT_PUBLIC_API_URL!;
 
 export function getKey(): string | null { return typeof window === "undefined" ? null : localStorage.getItem("cs_api_key"); }
@@ -13,7 +15,7 @@ export function getCsrf() { return csrf; }
 
 async function refreshCsrf(): Promise<string | null> {
   try {
-    const r = await fetch(`${API}/auth/session`, { credentials: "include" });
+    const r = await fetch(apiUrl("/auth/session"), { credentials: "include" });
     if (!r.ok) return null;
     csrf = (await r.json()).csrf_token ?? null;
     return csrf;
@@ -27,7 +29,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const method = (init.method ?? "GET").toUpperCase();
   const needsCsrf = !key && !SAFE.includes(method);
   if (needsCsrf && !csrf) await refreshCsrf();
-  const send = (tok: string | null) => fetch(`${API}${path}`, { ...init, credentials: "include", headers: {
+  const send = (tok: string | null) => fetch(apiUrl(path), { ...init, credentials: "include", headers: {
     "Content-Type": "application/json", ...(key ? { "X-API-Key": key } : {}), ...(tok ? { "X-CSRF-Token": tok } : {}), ...(init.headers || {}) } });
   let res = await send(needsCsrf ? csrf : null);
   if (res.status === 403 && needsCsrf) {   // token expired mid-session: refresh once and retry

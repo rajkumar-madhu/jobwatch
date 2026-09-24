@@ -2,6 +2,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, mutate, getKey, setKey, type Job } from "@/lib/api";
+import { authLoginHref } from "@/lib/auth-nav";
 import { Page, ErrorBox } from "@/components/ui";
 
 export default function SettingsPage() {
@@ -19,7 +20,7 @@ export default function SettingsPage() {
       <div className="max-w-2xl space-y-10 text-sm">
         <section><h2 className="mb-2 font-medium">Account</h2>
           {sess.data ? <p>Signed in as <b>{sess.data.user.email}</b>{sess.data.orgs?.length > 1 && <> · {sess.data.orgs.length} workspaces</>}</p>
-            : <p className="text-mute">Not signed in with an account. <a className="underline" href={`${process.env.NEXT_PUBLIC_API_URL}/auth/login?next=/settings`}>Sign in</a> or use an API key below.</p>}</section>
+            : <p className="text-mute">Not signed in with an account. <a className="underline" href={authLoginHref("/settings")}>Sign in</a> or use an API key below.</p>}</section>
         <section><h2 className="mb-2 font-medium">API key (alternative to sign-in)</h2>
           <input className={`${inp} font-mono`} value={k} onChange={(e) => { setK(e.target.value); setSaved(false); }} placeholder="cs_xxxx.…" />
           <button className="btn btn-primary mt-2" onClick={() => { setKey(k); setSaved(true); }}>Save key</button>{saved && <span className="ml-2 text-ok">Saved.</span>}

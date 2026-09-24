@@ -6,12 +6,9 @@ import { Suspense, useEffect, useState } from "react";
 import { Logo } from "@/components/brand";
 import { api } from "@/lib/api";
 import { authLoginHref } from "@/lib/auth-nav";
+import { ingestOrigin } from "@/lib/urls";
 
-const API = (process.env.NEXT_PUBLIC_API_URL ?? "").replace(/\/$/, "");
-/** Same host as the API on WeCrew; local compose uses :8010 for ingest. */
-const INGEST = API.includes("localhost") || API.includes("127.0.0.1")
-  ? API.replace(":8000", ":8010")
-  : API;
+const INGEST = ingestOrigin();
 const ORG_KEY = "jw_pending_org";
 
 const STEPS = [
@@ -181,8 +178,8 @@ function OnboardingInner() {
     : "";
 
   const helmCmd = tok?.token
-    ? `helm repo add cronsentinel https://charts.example.com\nhelm install cronsentinel-agent cronsentinel/agent \\\n  --set server=${INGEST} \\\n  --set bootstrapToken=${tok.token}`
-    : `helm repo add cronsentinel https://charts.example.com\nhelm install cronsentinel-agent cronsentinel/agent \\\n  --set server=${INGEST} \\\n  --set bootstrapToken=<bootstrap-token>`;
+    ? `helm install cronsentinel-agent ./infra/helm/cronsentinel-agent \\\n  --set server=${INGEST} \\\n  --set bootstrapToken=${tok.token}`
+    : `helm install cronsentinel-agent ./infra/helm/cronsentinel-agent \\\n  --set server=${INGEST} \\\n  --set bootstrapToken=<bootstrap-token>`;
 
   return (
     <Shell heroTitle={heroTitle} heroBody={heroBody} step={step}>

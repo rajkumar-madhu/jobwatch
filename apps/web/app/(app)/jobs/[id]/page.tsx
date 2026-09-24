@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
 import { api, mutate, type Job, type Execution } from "@/lib/api";
+import { ingestOrigin } from "@/lib/urls";
 import { ago, dur, ts, statusLabel } from "@/lib/format";
 import { Page, Status, Strip, Skeleton, ErrorBox, Empty } from "@/components/ui";
 
@@ -94,7 +95,7 @@ export default function JobPage() {
 
       <div className="mb-5">
         <div className="mb-1 flex items-baseline justify-between text-xs text-mute"><span>Run history — bar height = duration, click to inspect</span><span>older → newer</span></div>
-        {execs.isLoading ? <div className="skeleton h-6" /> : list.length === 0 ? <Empty title="No runs recorded yet" hint={`Ping this job: curl ${process.env.NEXT_PUBLIC_API_URL?.replace("8000", "8010")}/ping/${j.heartbeat_token}`} />
+        {execs.isLoading ? <div className="skeleton h-6" /> : list.length === 0 ? <Empty title="No runs recorded yet" hint={`Ping this job: curl ${ingestOrigin()}/ping/${j.heartbeat_token}`} />
           : <div className="rounded-md border border-line px-3 py-2"><Strip execs={list} onPick={setSel} /></div>}
       </div>
 
@@ -124,10 +125,10 @@ export default function JobPage() {
       </section>
       <details className="mt-6 text-sm"><summary className="cursor-pointer text-mute">Integration snippets</summary>
         <pre className="mt-2 overflow-auto rounded-md border border-line bg-panel p-3 font-mono text-xs">{`# simple
-curl -fsS ${process.env.NEXT_PUBLIC_API_URL?.replace("8000", "8010")}/ping/${j.heartbeat_token}
+curl -fsS ${ingestOrigin()}/ping/${j.heartbeat_token}
 
 # start/finish with exit code (bash)
-H=${process.env.NEXT_PUBLIC_API_URL?.replace("8000", "8010")}/heartbeat/${j.heartbeat_token}
+H=${ingestOrigin()}/heartbeat/${j.heartbeat_token}
 curl -fsS $H/start; ./your-job.sh && curl -fsS $H/success || curl -fsS $H/fail
 
 # agent wrapper (captures logs, duration, exit code)

@@ -104,6 +104,17 @@ def test_resolve_nats_host_does_not_invent_a_password(monkeypatch):
     assert parsed.hostname == "93.184.216.34"
 
 
+def test_resolve_nats_host_keeps_reserved_characters_in_the_password(monkeypatch):
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: [(0, 0, 0, "", ("93.184.216.34", 4222))])
+    resolved = netguard.resolve_nats_host("nats://user:p%40ss:word@broker.example.com:4222/events")
+    parsed = urlparse(resolved)
+    assert parsed.username == "user"
+    assert "%3A" in resolved
+    assert parsed.hostname == "93.184.216.34"
+    assert parsed.port == 4222
+    assert parsed.path == "/events"
+
+
 def test_resolve_nats_host_blocks_a_name_that_resolves_only_to_private_space(monkeypatch):
     monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: [(0, 0, 0, "", ("10.1.2.3", 4222))])
     with pytest.raises(netguard.BlockedDestination):
