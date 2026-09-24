@@ -74,14 +74,19 @@ def callback(code: str, state: str):
                                                             "client_id": settings.keycloak_client_id, "client_secret": settings.keycloak_client_secret}, timeout=10)
     if tok.status_code != 200: raise HTTPException(401, "token exchange failed")
     disc = _discovery()
+    # R35: the same response's access_token, so verify_id_token can check at_hash — Keycloak (and
+    # any spec-following IdP) puts at_hash on every id_token issued alongside an access_token,
+    # which every authorization_code exchange is. Found by testing against a real Keycloak: without
+    # this, every real login rejected with "No access_token provided to compare against at_hash".
+    at = tok.json().get("access_token")
     try:
         claims = verify_id_token(tok.json()["id_token"], jwks=fetch_jwks(disc["jwks_uri"]),
-                                 issuer=disc["issuer"], audience=settings.keycloak_client_id, nonce=nonce)
+                                 issuer=disc["issuer"], audience=settings.keycloak_client_id, nonce=nonce, access_token=at)
     except IdTokenError:
         # a rotated signing key looks exactly like a bad signature: refetch once before rejecting
         try:
             claims = verify_id_token(tok.json()["id_token"], jwks=fetch_jwks(disc["jwks_uri"], force=True),
-                                     issuer=disc["issuer"], audience=settings.keycloak_client_id, nonce=nonce)
+                                     issuer=disc["issuer"], audience=settings.keycloak_client_id, nonce=nonce, access_token=at)
         except IdTokenError as e:
             raise HTTPException(401, f"invalid id_token: {e}") from e
     email = claims.get("email")

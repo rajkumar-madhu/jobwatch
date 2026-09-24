@@ -47,9 +47,21 @@ def _key_for(jwks: dict, kid: str | None) -> dict:
 
 
 def verify_id_token(token: str, *, jwks: dict, issuer: str, audience: str, nonce: str | None = None,
-                    now: float | None = None) -> dict:
+                    now: float | None = None, access_token: str | None = None) -> dict:
     """Return the verified claims, or raise IdTokenError. Checks, in order:
-    alg allow-list, signature, iss, aud (incl. azp for multi-audience tokens), exp/iat, nonce."""
+    alg allow-list, signature, iss, aud (incl. azp for multi-audience tokens), exp/iat, at_hash, nonce.
+
+    access_token: R35 — found by running this against a real Keycloak (never a mocked JWKS): every
+    id_token issued alongside an access_token (i.e. every authorization_code exchange — exactly
+    what routers/auth.py's callback does) carries an `at_hash` claim. python-jose's decode() raises
+    JWTClaimsError the instant it sees at_hash with no access_token to check it against — so this
+    verifier, called from the callback without one, rejected every real login with a raw
+    JWTClaimsError leaking out as a 500 (or, until R35's oidc-in-isolation tests, silently: they
+    only ever minted tokens with no at_hash, so this path was never exercised end to end). Pass the
+    same-response access_token here so jose validates at_hash instead of tolerating its absence —
+    dropping the claim rather than checking it would trade one gap (login always fails) for a
+    worse one (a swapped access_token in a multi-token response goes unnoticed).
+    """
     try:
         header = jwt.get_unverified_header(token)
     except JWTError as e:
@@ -60,8 +72,10 @@ def verify_id_token(token: str, *, jwks: dict, issuer: str, audience: str, nonce
     key = _key_for(jwks, header.get("kid"))
     try:
         claims = jwt.decode(token, key, algorithms=list(ALLOWED_ALGS), issuer=issuer, audience=audience,
+                            access_token=access_token,
                             options={"verify_aud": True, "verify_iss": True, "verify_exp": True,
-                                     "verify_signature": True, "leeway": LEEWAY_S})
+                                     "verify_signature": True, "leeway": LEEWAY_S,
+                                     "verify_at_hash": access_token is not None})
     except JWTError as e:
         raise IdTokenError(f"id_token rejected: {e}") from e
 

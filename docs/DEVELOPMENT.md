@@ -944,3 +944,58 @@ Test-running note learned the hard way this round: do not run `tests/integration
 and reconciler eat events the in-process test workers expect (`test_pipeline_nats`,
 `test_slot_lifecycle` fail with `0 == 1`). Sequential runs: 507 passed / 28 skipped, then 9/9
 fullstack. Also: `pkill -f` patterns that appear in your own shell command line kill your shell.
+
+## R36 — real Keycloak found a real bug: every login would have 401ed
+
+Continuing the Keycloak realm-export work: stood up a real Keycloak 26.1.0 (downloaded from
+GitHub Releases — `go-bin`-style route, since `release-assets.githubusercontent.com` is on the
+egress allowlist even though `k8s.io`/module proxies are not) rather than reviewing the export by
+eye. That caught two real defects before either shipped:
+
+1. **The realm export required PKCE**, but `routers/auth.py` never sends a `code_verifier` —
+   `/auth/login` would have 400'd on the very first request against a real Keycloak. Removed the
+   `pkce.code.challenge.method` attribute (not needed: confidential client, server-held secret).
+2. **`verify_id_token()` had no way to check `at_hash`, and nothing called it with one.** Every
+   OIDC-spec-following IdP puts `at_hash` on an id_token issued alongside an access_token — which
+   is exactly what `/auth/callback`'s authorization_code exchange always produces. Confirmed by
+   pulling a real signed token from the live Keycloak and feeding it to the app's own
+   `verify_id_token()`: it raised `jose.exceptions.JWTClaimsError: No access_token provided to
+   compare against at_hash claim`. **Every real login would have failed in production.** Invisible
+   until now because `test_oidc.py`'s 11 tests, and `test_auth_flow.py`'s fake-IdP fixture, both
+   hand-mint tokens that never include `at_hash` — a stub JWKS/synthetic-JWT test suite, however
+   thorough, can't surface a claim it never occurred to anyone to add.
+
+   Fix: `verify_id_token()` takes an optional `access_token` and only turns on jose's
+   `verify_at_hash` when one is supplied — a token with no `at_hash` claim, or a caller that
+   legitimately has no access_token, behaves exactly as before. `routers/auth.py`'s callback now
+   passes `tok.json()["access_token"]` through at both call sites (happy path and the
+   JWKS-rotation retry). Verified against the real Keycloak: real token + real access_token →
+   accepted; a swapped access_token → rejected with "at_hash claim does not match access_token".
+
+   Then ran the **entire interactive login as a browser would** — not just the verifier in
+   isolation. First attempt was plain HTTP and hit a genuine, correct wall: Keycloak marks its
+   login-flow cookies `Secure; SameSite=None`, so no client (httpx or a real browser) will resend
+   them over `http://` — this is TLS-only by cookie spec, not a bug. Generated a self-signed cert,
+   ran Keycloak with real HTTPS, pointed the API at it (`SSL_CERT_FILE` env — httpx's default
+   client respects it for `verify=True`), and drove the complete round trip: `/auth/login` →
+   real 302 to Keycloak → real login form → real credential POST → real 302 back → `/auth/callback`
+   → session cookie set → `/auth/session` returns the real user's email. This is the first time
+   any part of this OIDC integration has been exercised end to end against an actual IdP.
+
+   New tests: `test_oidc.py` gained four (`_token()`'s helper now accepts `access_token=` and
+   mints a real matching `at_hash` via jose's own `encode(..., access_token=...)`) covering
+   accept/reject/mismatch/no-at_hash-at-all. `test_auth_flow.py`'s `_id_token()` now defaults to
+   embedding `at_hash` for `"at"` (the fake IdP's fixed access_token) — meaning every existing test
+   in that file now exercises the real bug's shape by default — plus two new tests: a genuine
+   mismatch caught through the real `/auth/callback` route (not just the library call), and a
+   token with no `at_hash` at all still working. Mutation-checked: reverting the `access_token=at`
+   wiring in `auth.py` fails exactly the one test built to catch it; nothing else regresses,
+   confirming the leniency-when-omitted design is intentional, not incidental.
+
+Also fixed in `deploy/keycloak/cronsentinel-realm.json`/`import.sh` from the same session: the
+export stays deliberately role-and-group-free (JobWatch's `memberships.role` in Postgres is the
+sole authority — Keycloak only proves identity), confirmed by two full `import.sh` runs against
+the live server (create, then idempotent update, same rotated-then-preserved secret both times).
+
+Backend: 513 passed / 28 skipped (one `test_slot_lifecycle` wall-clock flake reproduced once,
+non-reproducing on immediate rerun — not related to this round); fullstack 9/9.
