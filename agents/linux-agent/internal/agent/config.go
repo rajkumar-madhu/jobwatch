@@ -9,20 +9,20 @@ import (
 
 // Config is loaded from /etc/cronsentinel/agent.json (written by `enroll`).
 type Config struct {
-	ServerURL        string        `json:"server_url"`          // https://ingest.example.com
+	ServerURL        string        `json:"server_url"` // https://ingest.example.com
 	AgentID          string        `json:"agent_id"`
-	AgentKey         string        `json:"agent_key"`           // long-lived, hashed server-side
+	AgentKey         string        `json:"agent_key"` // long-lived, hashed server-side
 	HostID           string        `json:"host_id"`
 	Name             string        `json:"name"`
-	DiscoveryEvery   time.Duration `json:"discovery_every"`     // default 5m
-	MetricsEvery     time.Duration `json:"metrics_every"`       // default 30s
-	FlushEvery       time.Duration `json:"flush_every"`         // default 5s
-	BatchSize        int           `json:"batch_size"`          // default 100
-	BufferPath       string        `json:"buffer_path"`         // default /var/lib/cronsentinel/buffer.jsonl
-	PassiveJournal   bool          `json:"passive_journal"`     // watch cron journal for non-wrapped jobs
-	LogTailBytes     int           `json:"log_tail_bytes"`      // default 32768
-	EnvNameAllowlist []string      `json:"env_name_allowlist"`  // env var NAMES only, never values
-	InsecureSkipTLS  bool          `json:"insecure_skip_tls"`   // dev only
+	DiscoveryEvery   time.Duration `json:"discovery_every"`    // default 5m
+	MetricsEvery     time.Duration `json:"metrics_every"`      // default 30s
+	FlushEvery       time.Duration `json:"flush_every"`        // default 5s
+	BatchSize        int           `json:"batch_size"`         // default 100
+	BufferPath       string        `json:"buffer_path"`        // default /var/lib/cronsentinel/buffer.jsonl
+	PassiveJournal   bool          `json:"passive_journal"`    // watch cron journal for non-wrapped jobs
+	LogTailBytes     int           `json:"log_tail_bytes"`     // default 32768
+	EnvNameAllowlist []string      `json:"env_name_allowlist"` // env var NAMES only, never values
+	InsecureSkipTLS  bool          `json:"insecure_skip_tls"`  // dev only
 }
 
 func Defaults() Config {

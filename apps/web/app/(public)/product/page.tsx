@@ -25,7 +25,7 @@ const SECTIONS: Sec[] = [
   { id: "logs", nav: "Logs", h: "The output of the run that failed, right there", lead: "Wrap a job with cs-run and its stdout, stderr and exit code arrive with the execution.",
     bullets: ["Captured per execution, searchable, retained by plan", "Storage metered per organisation, incrementally — no scan of your logs to bill you", "Log volume shown against your plan before you hit the limit", "Environment variable values are never collected"],
     to: "/logs", toLabel: "Browse logs", shot: "logs" },
-  { id: "analytics", nav: "Analytics", h: "Success rate, p95 runtime, top failing — per job, over time", lead: "Enough to answer the Monday question without opening a spreadsheet.",
+  { id: "analytics", nav: "Analytics", h: "Success rate, p95 runtime, top failing — per job, over time", lead: "Enough to answer “which jobs are getting flakier?” without opening a spreadsheet.",
     bullets: ["Overview with today's executions, success rate, MTTD and MTTR", "Slowest and most-failing jobs over seven days", "Per-job duration percentiles from the execution history", "Every number computed from records you can drill into"],
     to: "/analytics", toLabel: "Open analytics", shot: "analytics" },
   { id: "signals", nav: "Signals", h: "Push state changes into your own systems", lead: "Every job state change is a signed signal you can deliver to a webhook or your own NATS broker.",
@@ -62,12 +62,12 @@ const Row = ({ s, n, r, strip }: { s: string; n: string; r: string; strip?: stri
 const SHOTS = {
   agents: () => <Win title="agents · 3 online">
     <Row s="healthy" n="db-01 · cron agent" r="14 jobs" /><Row s="healthy" n="prod-eks · k8s agent" r="31 CronJobs" /><Row s="healthy" n="etl-worker · systemd" r="6 timers" />
-    <div className="mt-2 rounded bg-bg p-2 font-mono text-[11px] text-mute">curl -fsS $JOBWATCH_URL/hb/&lt;token&gt;   # heartbeat, no agent</div></Win>,
+    <div className="mt-2 rounded bg-bg p-2 font-mono text-[11px] text-mute">curl -fsS $JOBWATCH_URL/ping/&lt;token&gt;   # heartbeat, no agent</div></Win>,
   schedule: () => <Win title="nightly-database-backup · slots">
     {[["succeeded", "02:00", "14m 02s"], ["succeeded", "02:00", "13m 48s"], ["late", "02:00", "grace until 02:10"], ["missed", "02:00", "no run seen"], ["unobserved", "02:00", "monitoring gap on our side"], ["pending", "02:00", "next"]]
       .map(([s, t, r], i) => <div key={i} className="flex gap-3 border-b border-line py-1.5 last:border-0"><span className="w-20 font-mono text-mute">{t}</span><span className={`w-24 ${s === "missed" ? "text-warn" : s === "unobserved" ? "text-mute" : s === "late" ? "text-warn" : s === "succeeded" ? "text-ok" : ""}`}>{s}</span><span className="text-mute">{r}</span></div>)}</Win>,
   alerting: () => <Win title="alert rules">
-    {[["failure", "any job · failed", "#ops-alerts"], ["consecutive_failures ≥ 3", "tag:billing", "PagerDuty"], ["late", "workspace:prod", "email"]].map(([c, s, ch]) =>
+    {[["failure", "any job · failed", "#ops-alerts"], ["consecutive_failures ≥ 3", "tag:billing", "webhook"], ["late", "workspace:prod", "email"]].map(([c, s, ch]) =>
       <div key={c} className="flex items-center gap-2 border-b border-line py-1.5 last:border-0"><span className="rounded bg-bg px-1.5 font-mono">{c}</span><span className="flex-1 text-mute">{s}</span><span>{ch}</span></div>)}
     <div className="mt-2 flex items-center gap-2 rounded border border-line bg-bg p-2 text-mute"><Dot s="missed" />41 slots unobserved during a platform gap — <b className="text-ink">0 alerts sent</b></div></Win>,
   incidents: () => <Win title="INC-118 · open">

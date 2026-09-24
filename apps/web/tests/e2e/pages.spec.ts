@@ -71,6 +71,19 @@ test("landing page renders", async ({ page }) => {
   await expect(page.locator("body")).toContainText(/JobWatch/i);
 });
 
+// R35 brand review: the public pages only promise what the code delivers. The heartbeat route is
+// /ping/{token} (apps/api/routers/heartbeat.py), and pagerduty/opsgenie/sms/sso/saml are TODOs
+// with no sender or provider behind them — none of them may appear as an offer.
+for (const path of ["/welcome", "/product"]) {
+  test(`${path} makes no claims the code does not back`, async ({ page }) => {
+    await page.goto(path);
+    const body = await page.locator("body").innerText();
+    expect(body).toContain("/ping/");
+    expect(body).not.toMatch(/\/hb\//);
+    expect(body).not.toMatch(/PagerDuty|Opsgenie|\bSAML\b|\bSSO\b|SMS alerts|AI diagnostics|Advanced analytics/);
+  });
+}
+
 // R33: /product — the feature tour. Same rules as every app page: no third-party host, no console
 // error, every section reachable from the sticky anchor bar, every "Learn more" points into the app.
 test("product page renders with no third-party requests and working anchors", async ({ page }) => {

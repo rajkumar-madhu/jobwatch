@@ -11,8 +11,8 @@ const FEED: [string, string, string][] = [
 ];
 const PLANS: [string, string, string[]][] = [
   ["Free", "$0", ["5 jobs", "7-day history", "Email alerts"]], ["Developer", "$19/mo", ["50 jobs", "30-day history", "Slack & webhooks"]],
-  ["Team", "$79/mo", ["500 jobs", "90-day history", "AI diagnostics", "Kubernetes"]], ["Business", "$299/mo", ["5,000 jobs", "1-year history", "Advanced analytics", "SSO"]],
-  ["Enterprise", "Custom", ["Unlimited jobs", "SAML", "Private deployment", "Custom retention", "Priority support"]],
+  ["Team", "$79/mo", ["500 jobs", "90-day history", "Teams, Discord & Telegram", "AI copilot"]], ["Business", "$299/mo", ["5,000 jobs", "1-year history", "Everything in Team"]],
+  ["Enterprise", "Custom", ["Unlimited jobs", "Private deployment", "Custom retention", "Priority support"]],
 ];
 const FAQ: [string, string][] = [
   ["Does the agent change my crontabs?", "No. Discovery is read-only. You choose per job whether to wrap it with cs-run for exit codes and logs."],
@@ -101,14 +101,14 @@ export default function Welcome() {
             <h1 className="mt-3 text-4xl font-semibold leading-[1.05] tracking-tight sm:text-6xl">Never miss a scheduled job again.</h1>
             <p className="mt-5 max-w-xl text-lg text-mute">Cron, systemd timers, Kubernetes CronJobs, backups and pipelines — expected before they run, alerted when they don't, explained when they fail.</p>
             <div className="mt-8 flex flex-wrap gap-3"><Link href="/login" className="btn btn-primary px-5 py-2.5 text-base">Start monitoring</Link><Link href="/product" className="btn px-5 py-2.5 text-base">See the product</Link></div>
-            <p className="mt-4 text-sm text-mute">Free for 5 jobs · no card · self-host with compose or Helm</p>
+            <p className="mt-4 text-sm text-mute">Free for 5 jobs · self-host with compose or Helm</p>
           </div>
           <DashboardMock />
         </div>
       </section>
 
       <section className="border-y border-line bg-panel/50"><div className="mx-auto grid max-w-6xl grid-cols-2 gap-6 px-6 py-8 text-sm sm:grid-cols-4">
-        {[["3 schedulers", "discovered read-only: cron, systemd, K8s CronJobs"], ["Row-level security", "per tenant, enforced by Postgres for every role"], ["Open API", "typed spec; the dashboard uses the same one"], ["Your stack", "self-host the same code, no third-party callouts"]].map(([v, l]) => (
+        {[["3 schedulers", "discovered read-only: cron, systemd, Kubernetes CronJobs"], ["Row-level security", "per tenant, enforced by Postgres for every role"], ["Open API", "typed spec; the dashboard uses the same one"], ["Your stack", "self-host the same code, no third-party callouts"]].map(([v, l]) => (
           <div key={v}><div className="font-semibold">{v}</div><div className="text-mute">{l}</div></div>))}
       </div></section>
 
@@ -134,12 +134,12 @@ export default function Welcome() {
         <div className="mt-8 grid gap-8 md:grid-cols-2">
           <div><h3 className="text-sm font-medium text-mute">Discovered by the agent</h3><ul className="mt-3 flex flex-wrap gap-2">{NATIVE.map((p) => <li key={p} className="rounded-full border border-accent/40 bg-accent/5 px-3 py-1 text-sm">{p}</li>)}</ul></div>
           <div><h3 className="text-sm font-medium text-mute">Anything else, with one heartbeat call</h3><ul className="mt-3 flex flex-wrap gap-2">{VIA_HEARTBEAT.map((p) => <li key={p} className="rounded-full border border-line bg-panel px-3 py-1 text-sm">{p}</li>)}</ul>
-            <pre className="mt-4 overflow-x-auto rounded-xl border border-line bg-panel p-3 font-mono text-xs text-mute">curl -fsS "$JOBWATCH_URL/hb/$TOKEN"   # at the end of any script</pre></div>
+            <pre className="mt-4 overflow-x-auto rounded-xl border border-line bg-panel p-3 font-mono text-xs text-mute">curl -fsS "$JOBWATCH_URL/ping/$TOKEN"   # at the end of any script</pre></div>
         </div>
       </section>
 
       <section className="border-t border-line bg-panel/50"><div className="mx-auto grid max-w-6xl gap-10 px-6 py-20 md:grid-cols-2">
-        <div><h2 className="text-2xl font-semibold tracking-tight">Alerts where your team lives</h2><p className="mt-2 text-mute">Slack, Microsoft Teams, Discord, Telegram, email, and a signed webhook for anything else — PagerDuty and Opsgenie included, through their webhook intake. Every send is written to a ledger you can read back, and a platform outage on our side never pages you.</p></div>
+        <div><h2 className="text-2xl font-semibold tracking-tight">Alerts where your team lives</h2><p className="mt-2 text-mute">Slack, Microsoft Teams, Discord, Telegram, email, and a signed webhook for anything that accepts JSON. Every send is written to a ledger you can read back, and a platform outage on our side never pages you.</p></div>
         <div><h2 className="text-2xl font-semibold tracking-tight">Built for teams who get audited</h2><p className="mt-2 text-mute">Row-level tenant isolation enforced by Postgres, roles from viewer to owner, secrets envelope-encrypted at rest, an SSRF guard on every outbound request, self-service export and deletion of your organisation's data — and a copilot that reads but never runs anything.</p></div>
       </div></section>
 
@@ -158,7 +158,7 @@ export default function Welcome() {
 
       <section className="mx-auto max-w-6xl px-6 py-24 text-center">
         <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">Know before your users do.</h2>
-        <p className="mt-3 text-mute">Five jobs free. Ten minutes to the first alert.</p>
+        <p className="mt-3 text-mute">Five jobs free. One curl to the first alert.</p>
         <div className="mt-6 flex justify-center gap-3"><Link href="/login" className="btn btn-primary px-6 py-3 text-base">Start monitoring</Link><Link href="/product" className="btn px-6 py-3 text-base">See the product</Link></div>
       </section>
 

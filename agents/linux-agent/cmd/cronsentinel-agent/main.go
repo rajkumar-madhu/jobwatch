@@ -14,6 +14,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -26,7 +27,16 @@ import (
 	"github.com/cronsentinel/linux-agent/internal/journal"
 )
 
-const configPath = "/etc/cronsentinel/agent.json"
+const defaultConfigPath = "/etc/cronsentinel/agent.json"
+
+// configPath is /etc/cronsentinel/agent.json unless CRONSENTINEL_CONFIG overrides it — for running
+// the agent unprivileged (tests, a per-user install). The buffer path is inside the config itself.
+var configPath = func() string {
+	if p := os.Getenv("CRONSENTINEL_CONFIG"); p != "" {
+		return p
+	}
+	return defaultConfigPath
+}()
 
 func hostID() string {
 	if b, err := os.ReadFile("/etc/machine-id"); err == nil && len(b) > 8 {
@@ -80,7 +90,7 @@ func cmdEnroll(args []string) {
 	if err != nil {
 		log.Fatalf("enroll failed: %v", err)
 	}
-	os.MkdirAll("/etc/cronsentinel", 0o750)
+	os.MkdirAll(filepath.Dir(configPath), 0o750)
 	if err := cfg.Save(configPath); err != nil {
 		log.Fatalf("save config: %v", err)
 	}

@@ -886,3 +886,61 @@ Copy corrections while at it — the old page claimed things the code does not d
 Pre-existing Pipeline visual: the animated packets overlapped node labels at phone width; hidden
 below `md`, nodes and connectors stay. Screenshot in `docs/screenshots/welcome-page.png`.
 50/50 Playwright.
+
+## R35 — the Linux agent, compiled and run against the real stack; landing copy audited
+
+The Go agent under `agents/linux-agent` had never been compiled (open since R1: no Go toolchain in
+the sandbox, `go.dev` and `proxy.golang.org` off the egress allowlist). Every claim about it on the
+landing pages — exit codes preserved, env var values never collected, `cs-run` alias — was source
+inspection. Route found: the `go-bin` wheel on PyPI carries a full Go toolchain (1.27.1). The agent
+is stdlib-only, so no module proxy is needed.
+
+- `go build`/`go vet` clean on first compile. One test was red: `nameFromCommand` gave `php` for
+  `php /var/www/artisan schedule:run`. Now skips a list of interpreters/wrappers (`php`, `node`,
+  `ruby`, `perl`, `java`, `env`, `nice`, `timeout`, `flock`, `chronic`, `exec`, …) → `artisan`.
+- `CRONSENTINEL_CONFIG` overrides `/etc/cronsentinel/agent.json` so the agent runs unprivileged
+  (tests, a per-user install). The buffer path lives inside the config as before.
+- `tests/fullstack/test_linux_agent_e2e.py` drives the real chain with the real binary: API mints
+  a bootstrap token → `enroll` at ingest (token is one-time: second use → 401) → the `cs-run`
+  symlink from `packaging/install.sh` wraps `sh -c 'echo …; exit 3'` with `DB_PASSWORD=<unique>`
+  in its environment → `run` flushes → the exec-processor writes the execution. Asserts: wrapper
+  exits 3, stdout/stderr pass through, on-disk buffer is `[start, fail]`, `env_var_names ⊆` the
+  default allowlist, the secret value appears in no execution row, no `execution_events` payload
+  and not in the buffer file, and the agent row has `last_seen_at`/version. Builds the binary
+  itself when `go` is on PATH, or uses `AGENT_BIN`; `.github/workflows/fullstack.yml` now runs
+  `setup-go`. Mutation-checked: leaking values (`out = append(out, kv)`) fails on the secret;
+  swallowing the exit code fails `0 == 3`.
+- `agents/k8s-agent` is still uncompiled: `k8s.io` vanity imports are not on the allowlist. Add
+  `k8s.io` and `proxy.golang.org` to egress and it can be built the same way.
+
+Brand review of `/welcome` and `/product` (High/Medium items), resolved by evidence where the code
+backs the claim and by removal where it does not:
+- heartbeat URL `/hb/$TOKEN` → `/ping/$TOKEN` (the route is `/ping/{token}`).
+- `cs-run` stays: it is a real alias (`install.sh` symlink; `main.go` dispatches on `argv[0]`),
+  now exercised by the E2E test above. "Environment variable values are never collected" stays for
+  the same reason.
+- Pricing rebuilt from `plan_limits` and what code enforces: caps and retention (`jobs.py`,
+  `agents.py`), channel kinds (`alerting.py` 402), copilot (`ai`). Removed "AI diagnostics",
+  "Advanced analytics", "SSO", "SAML" (TODO Phase 6, no code). Rejected "higher rate limits" and
+  "SMS alerts" after checking (`ratelimit.py` is not plan-scaled; `_SENDERS` has no sms).
+- "PagerDuty and Opsgenie … through their webhook intake" removed: the signed webhook sends our
+  payload; PagerDuty Events v2 and Opsgenie need their own schemas. Now "anything that accepts JSON".
+- "no card" (contradicted "prices are placeholders"), "Ten minutes to the first alert" (unmeasured
+  → "One curl to the first alert"), `K8s` → `Kubernetes`, "the Monday question" → literal.
+- Playwright guard (`tests/e2e/pages.spec.ts`): both pages must contain `/ping/` and must not
+  mention `/hb/`, PagerDuty, Opsgenie, SAML, SSO, SMS alerts, AI diagnostics, Advanced analytics.
+  It caught the webhook-intake sentence a manual grep had missed. 54/54 (was 50).
+
+Migration `0015`: `plan_limits.features` for `business` was seeded (0001) with `pagerduty, opsgenie,
+sms, sso, analytics` — none deliverable — and `app/(app)/billing/page.tsx` renders the array
+verbatim, so the in-app billing page made the same promise the landing page just stopped making.
+Business now carries the Team feature set; its distinction is 5,000 jobs and 365-day retention.
+`tests/integration/test_channel_kinds_consistent.py` pins router `_KINDS` == notifier `_SENDERS`
+and that no seeded plan advertises a kind outside them (red before 0015, green after). The billing
+page maps feature keys to labels (`ai` → "AI copilot", not "Ai").
+
+Test-running note learned the hard way this round: do not run `tests/integration` while
+`scripts/fullstack.sh` is up. Both consume the same NATS subjects, so the stack's exec-processor
+and reconciler eat events the in-process test workers expect (`test_pipeline_nats`,
+`test_slot_lifecycle` fail with `0 == 1`). Sequential runs: 507 passed / 28 skipped, then 9/9
+fullstack. Also: `pkill -f` patterns that appear in your own shell command line kill your shell.

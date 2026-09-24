@@ -4,6 +4,11 @@ import { api, mutate } from "@/lib/api";
 import { ago } from "@/lib/format";
 import { Page, Skeleton, ErrorBox } from "@/components/ui";
 
+// R35: plan_limits.features keys → what the customer reads. Keys not listed render raw, which is a
+// signal to add a label (or to ask whether the feature exists at all — see migration 0015).
+const FEATURE_LABEL: Record<string, string> = { slack: "Slack", webhook: "Webhooks", teams: "Microsoft Teams", discord: "Discord",
+  telegram: "Telegram", ai: "AI copilot", kubernetes: "Kubernetes agent" };
+
 export default function BillingPage() {
   const q = useQuery({ queryKey: ["billing"], queryFn: () => api<any>("/api/v1/billing") });
   const checkout = useMutation({ mutationFn: (plan: string) => mutate("/api/v1/billing/checkout", "post", { query: { plan } }) as Promise<{ url: string }>, onSuccess: (d) => (location.href = d.url) });
@@ -27,7 +32,7 @@ export default function BillingPage() {
       {!configured && <p className="mb-4 rounded-md border border-warn/40 bg-warn/5 px-3 py-2 text-sm">Stripe is not configured on this deployment — plan changes are disabled. Set <code className="font-mono">STRIPE_SECRET_KEY</code> and price IDs in <code className="font-mono">plan_limits</code>.</p>}
       <div className="grid gap-3 md:grid-cols-5">{plans.map((p: any) => { const cur = p.plan === (s?.effective_plan ?? "free"); return (
         <div key={p.plan} className={`rounded-lg border p-4 text-sm ${cur ? "border-accent" : "border-line"}`}><h3 className="font-medium capitalize">{p.plan}</h3><p className="text-xl font-semibold">{p.monthly_usd == null ? "Custom" : p.monthly_usd === 0 ? "$0" : `$${p.monthly_usd}/mo`}</p>
-          <ul className="mt-2 space-y-0.5 text-mute"><li>{p.max_jobs ?? "Unlimited"} jobs</li><li>{p.retention_days ?? "Custom"}{p.retention_days ? "-day" : ""} history</li>{p.features.filter((f: string) => !["email", "all"].includes(f)).map((f: string) => <li key={f} className="capitalize">{f}</li>)}</ul>
+          <ul className="mt-2 space-y-0.5 text-mute"><li>{p.max_jobs ?? "Unlimited"} jobs</li><li>{p.retention_days ?? "Custom"}{p.retention_days ? "-day" : ""} history</li>{p.features.filter((f: string) => !["email", "all"].includes(f)).map((f: string) => <li key={f}>{FEATURE_LABEL[f] ?? f}</li>)}</ul>
           {cur ? <span className="mt-3 block text-xs text-accent">Current</span> : p.plan === "enterprise" ? <a className="btn mt-3 w-full justify-center" href="mailto:sales@example.com">Contact us</a> : <button className="btn btn-primary mt-3 w-full justify-center" disabled={!configured || checkout.isPending} onClick={() => checkout.mutate(p.plan)}>{plans.findIndex((x: any) => x.plan === p.plan) > plans.findIndex((x: any) => x.plan === (s?.effective_plan ?? "free")) ? "Upgrade" : "Downgrade"}</button>}</div>); })}</div>
     </Page>
   );

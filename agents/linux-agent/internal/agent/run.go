@@ -64,7 +64,10 @@ func Run(ctx context.Context, cfg Config, push func(Event) error, jobToken, fing
 		_ = push(ev)
 		seq++
 	}
-	emit("start", func(e *Event) { e.EnvVarNames = envNames(cfg.EnvNameAllowlist); e.Meta["command"] = strings.Join(argv, " ") })
+	emit("start", func(e *Event) {
+		e.EnvVarNames = envNames(cfg.EnvNameAllowlist)
+		e.Meta["command"] = strings.Join(argv, " ")
+	})
 
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	so, se := &tailWriter{n: cfg.LogTailBytes}, &tailWriter{n: cfg.LogTailBytes}
