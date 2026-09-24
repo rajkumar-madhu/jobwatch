@@ -139,8 +139,14 @@ def resolve_nats_host(url: str) -> str:
     addrs = [a for a in _resolve(u.hostname, port) if _allowed(ipaddress.ip_address(a))]
     if not addrs:
         raise BlockedDestination(f"{u.hostname} has no permitted address")
-    userinfo = f"{u.username}:{u.password}@" if u.username else ""
-    return u._replace(netloc=f"{userinfo}{addrs[0]}:{port}").geturl()
+    host = f"[{addrs[0]}]" if ":" in addrs[0] else addrs[0]
+    if u.username is None:
+        userinfo = ""
+    elif u.password is None:
+        userinfo = f"{u.username}@"
+    else:
+        userinfo = f"{u.username}:{u.password}@"
+    return u._replace(netloc=f"{userinfo}{host}:{port}").geturl()
 
 
 class _GuardedBackend(httpcore.SyncBackend):

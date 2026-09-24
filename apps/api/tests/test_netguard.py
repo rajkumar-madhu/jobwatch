@@ -2,6 +2,7 @@
 import socket
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import urlparse
 
 import httpx
 import pytest
@@ -83,6 +84,24 @@ def test_resolve_nats_host_swaps_in_the_validated_address(monkeypatch):
     monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: [(0, 0, 0, "", ("93.184.216.34", 4222))])
     resolved = netguard.resolve_nats_host("nats://broker.example.com:4222/")
     assert "93.184.216.34" in resolved and "broker.example.com" not in resolved
+
+
+def test_resolve_nats_host_brackets_an_ipv6_address(monkeypatch):
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: [(0, 0, 0, "", ("2606:4700:4700::1111", 4222))])
+    resolved = netguard.resolve_nats_host("nats://broker.example.com:4222/events")
+    parsed = urlparse(resolved)
+    assert parsed.hostname == "2606:4700:4700::1111"
+    assert parsed.port == 4222
+    assert parsed.path == "/events"
+
+
+def test_resolve_nats_host_does_not_invent_a_password(monkeypatch):
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: [(0, 0, 0, "", ("93.184.216.34", 4222))])
+    resolved = netguard.resolve_nats_host("nats://token@broker.example.com:4222/")
+    parsed = urlparse(resolved)
+    assert parsed.username == "token"
+    assert parsed.password is None
+    assert parsed.hostname == "93.184.216.34"
 
 
 def test_resolve_nats_host_blocks_a_name_that_resolves_only_to_private_space(monkeypatch):
