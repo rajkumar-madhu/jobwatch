@@ -17,7 +17,15 @@
 ---
 apiVersion: batch/v1
 kind: Job
-metadata: {name: {{ include "cs.fullname" . }}-migrate, namespace: {{ .Release.Namespace }}, annotations: {"helm.sh/hook": pre-install,pre-upgrade, "helm.sh/hook-delete-policy": hook-succeeded}}
+metadata:
+  name: {{ include "cs.fullname" . }}-migrate
+  namespace: {{ .Release.Namespace }}
+  # R37: same unquoted-comma-in-a-flow-map bug as secret.yaml's migration secret (see comment
+  # there) — this Job never ran on `helm upgrade`, only on first install. Split onto its own
+  # lines, not just quoted, so a future multi-value annotation can't reintroduce it by habit.
+  annotations:
+    helm.sh/hook: "pre-install,pre-upgrade"
+    helm.sh/hook-delete-policy: "hook-succeeded"
 spec:
   template:
     spec:

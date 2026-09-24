@@ -83,8 +83,33 @@ jobs:
         with: {go-version: "1.23"}
       - run: cd agents/linux-agent && go vet ./... && go test ./... && make build
       - run: cd agents/k8s-agent && go mod tidy && go vet ./... && go build ./...
+  helm:
+    # R37: infra/helm/{cronsentinel,cronsentinel-agent} were never actually rendered before this
+    # round — a bad flow-map annotation (`{"helm.sh/hook": pre-install,pre-upgrade, ...}`, comma
+    # unquoted) silently broke the migration hook on every `helm upgrade` after the first install,
+    # invisible to any review that didn't parse the real output. The real `helm` binary can't be
+    # built here — it needs k8s.io/client-go, off this repo's egress allowlist — so
+    # tools/mini-helm reimplements the actual rendering surface (text/template + sprig + Helm's
+    # own include/toYaml/required) these two charts use, and additionally checks every rendered
+    # document for the exact class of bug that shipped (a null value inside annotations/labels,
+    # which is always the result of an unquoted comma/colon splitting one flow-map entry into two).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: {go-version: "1.23"}
+      - run: cd tools/mini-helm && go build -o mini-helm .
+      - run: tools/mini-helm/mini-helm --chart infra/helm/cronsentinel --release ci --namespace ci
+      # cronsentinel-agent requires bootstrapToken; render once with none to prove the guard fires
+      # (must fail) and once with a real value (must pass) — a green run that never actually
+      # exercised the required() guard would be worth nothing.
+      - run: |
+          if tools/mini-helm/mini-helm --chart infra/helm/cronsentinel-agent --release ci --namespace ci; then
+            echo "expected the default (no bootstrapToken) render to fail" && exit 1
+          fi
+      - run: tools/mini-helm/mini-helm --chart infra/helm/cronsentinel-agent --release ci --namespace ci --set bootstrapToken=ci-placeholder
   images:
-    needs: [api, web, agents]
+    needs: [api, web, agents, helm]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:

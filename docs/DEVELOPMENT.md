@@ -999,3 +999,54 @@ the live server (create, then idempotent update, same rotated-then-preserved sec
 
 Backend: 513 passed / 28 skipped (one `test_slot_lifecycle` wall-clock flake reproduced once,
 non-reproducing on immediate rerun — not related to this round); fullstack 9/9.
+
+## R37 — actually rendering the Helm charts found a real deployment-blocking bug
+
+`infra/helm/{cronsentinel,cronsentinel-agent}` had never been rendered — no `helm template`, no
+`helm lint`, ever, against either chart. The real `helm` binary can't be built here: it
+transitively needs `k8s.io/client-go`/`k8s.io/api` (same wall as `agents/k8s-agent`), and
+`helm.sh`/`get.helm.sh` aren't reachable either. Rather than review the YAML by eye, wrote
+`tools/mini-helm` — a from-scratch renderer using `text/template` + `Masterminds/sprig`, which
+actually is Helm's rendering core (plus `include`/`toYaml`/`required`, which mini-helm also
+implements). Getting sprig's own dependency tree to resolve needed four `go mod replace`
+redirects — `dario.cat/mergo`, `golang.org/x/crypto`, `gopkg.in/yaml.v2`, `gopkg.in/yaml.v3`, and
+transitively `gopkg.in/check.v1` — to their real GitHub-hosted mirrors, since none of those vanity
+domains are on the egress allowlist either. Every one of those mirrors is a normal, ordinary
+GitHub Go module, so on a real CI runner with unrestricted internet this all resolves through the
+default `proxy.golang.org` with no special configuration; the `replace` directives and committed
+`go.sum` are what make it work at all in this sandbox.
+
+First run found a real bug: `annotations: {"helm.sh/hook": pre-install,pre-upgrade, ...}` — the
+multi-value hook string was **unquoted** inside a flow-style map. The comma silently ended the
+`"helm.sh/hook"` entry and opened a second, bogus, null-valued `"pre-upgrade"` key. A real
+Kubernetes API server rejects a null annotation value outright (`annotations` is
+`map[string]string`), and even setting that aside, the practical effect was worse: the migration
+Secret and the migrate Job (same bug, both places) would only ever have `helm.sh/hook: pre-install`
+— meaning **the schema-migration Job never ran on `helm upgrade`, only on the very first
+`helm install`.** Every deploy after the first would silently skip `alembic upgrade head`. Fixed
+both occurrences (`templates/secret.yaml`, `templates/workloads.yaml`), the second one split onto
+separate lines so a future multi-value annotation can't reintroduce the exact same mistake by habit.
+
+Also found, same session: `cronsentinel-agent`'s `bootstrapToken` defaulted to `""` with nothing
+enforcing an override — a bare `helm install` would silently deploy an agent that can never
+enroll. Added Helm's own `required()`, scoped correctly to skip when `existingSecret` is used
+instead (verified both branches independently). Checked, and correctly did *not* touch, the main
+chart's other blank-by-default secrets (`SECRET_ENCRYPTION_KEY`, Stripe keys): `cronsentinel/keys.py`
+already raises `RuntimeError("SECRET_ENCRYPTION_KEY is not set")` at import time — the app won't
+even start serving on an empty key, so a chart-level guard there would be redundant. Confirmed
+from the actual source, not assumed.
+
+`mini-helm` also gained a generic check for the whole bug class (any `null` value inside
+`metadata.annotations`/`metadata.labels`), not just the one instance found — mutation-checked:
+reverting either fix (the flow map's quoting, or the `required()` guard) makes the tool fail with
+a specific diagnostic; both charts render clean restored. Committed into the repo at
+`tools/mini-helm/` (see its README) with a `go.sum` verified to build fully offline
+(`GOPROXY=off`) from a warm module cache, and wired into `.github/workflows/ci.yml` as a new
+`helm` job: renders `cronsentinel`, and renders `cronsentinel-agent` twice — once with no
+`bootstrapToken` (must fail, proving the guard actually fires) and once with `--set
+bootstrapToken=...` (must pass) — a green run that never exercised the guard would prove nothing.
+`images` now also depends on `helm` passing.
+
+Not covered by this tool, by design (see its README): no live-cluster schema validation (a
+correctly-quoted but semantically invalid field for a given Kubernetes API version would not be
+caught), no `.Files`/subchart support (neither chart uses either).
